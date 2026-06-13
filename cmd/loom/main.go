@@ -22,6 +22,7 @@ import (
 	"github.com/alanjchuang/goagent/internal/heartbeat"
 	"github.com/alanjchuang/goagent/internal/logging"
 	"github.com/alanjchuang/goagent/internal/scaffold"
+	"github.com/alanjchuang/goagent/internal/tracing"
 	"github.com/alanjchuang/goagent/internal/ui"
 )
 
@@ -261,6 +262,10 @@ func runCmd(args []string) {
 	hb := heartbeat.New(ckptMgr.HeartbeatPath(state.TaskID), ac.Name, 5*time.Second)
 	hb.Start()
 	defer hb.Stop()
+
+	// 可选：langfuse 追踪（仅当配置了凭据时启用）。
+	tracer := tracing.Start(ac.Name)
+	defer tracer.Stop()
 
 	// 可选：同进程启动 Web 可视化面板，实时展示本次运行事件。
 	if *uiPort > 0 {
