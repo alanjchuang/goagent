@@ -147,8 +147,10 @@ go run ./cmd/loom run applications/demo/workflows/demo_agent.yaml --ui 8080
 http://localhost:8080
 ```
 
-Web UI 包含两个页签：
+Web UI 是面向新手的操作界面，包含四个页签：
 
+- `和模型对话`：直接和 `config/llm.yaml` 中配置的模型聊天，不需要写命令。
+- `执行 Applications`：自动列出 `applications/**/workflows/*.yaml`，选择应用、填写任务并运行。
 - `实时事件`：通过 SSE 实时展示 Agent step、tool_call、tool_result、final_answer 等事件。
 - `本地日志`：查看 `.logs/<agent>/<timestamp>/run.log`。该页签需要运行 Agent 时加 `--log-to-file` 才会有归档日志。
 
@@ -239,7 +241,14 @@ go run ./cmd/loom clean-tasks --all
 go run ./cmd/loom ui --port 8080
 ```
 
-单独启动时可以查看已经归档到 `.logs` 的本地日志；实时事件只会显示当前进程内的历史/新增事件。
+打开 `http://localhost:8080` 后，新手可以直接：
+
+1. 在 `和模型对话` 页签输入问题并发送。
+2. 在 `执行 Applications` 页签选择一个应用，填写任务并点击运行。
+3. 切到 `实时事件` 查看 Agent 执行过程。
+4. 切到 `本地日志` 查看已经归档到 `.logs` 的历史日志。
+
+注意：单独启动 UI 时，实时事件只会显示当前 UI 进程内的历史/新增事件；如果想边运行边看事件，可以用 `loom run ... --ui 8080`。
 
 ### 6. 编写 Agent YAML
 
@@ -612,8 +621,10 @@ Open:
 http://localhost:8080
 ```
 
-The Web UI has two tabs:
+The Web UI is beginner-friendly and has four tabs:
 
+- `和模型对话` / chat with model: chat directly with the model configured in `config/llm.yaml`.
+- `执行 Applications` / run applications: list `applications/**/workflows/*.yaml`, choose one, enter a task, and run it.
 - `实时事件` / live events: real-time agent events such as step, tool_call, tool_result, and final_answer over SSE.
 - `本地日志` / local logs: archived `.logs/<agent>/<timestamp>/run.log` files. Run the agent with `--log-to-file` to generate these files.
 
@@ -689,7 +700,14 @@ go run ./cmd/loom clean-tasks --all
 go run ./cmd/loom ui --port 8080
 ```
 
-When started standalone, the UI can read archived local logs from `.logs`. Live events are limited to events in the current process.
+Open `http://localhost:8080`, then a beginner can:
+
+1. Ask questions in the `和模型对话` tab.
+2. Choose and run an application in the `执行 Applications` tab.
+3. Inspect agent execution in the `实时事件` tab.
+4. Read archived logs from `.logs` in the `本地日志` tab.
+
+When started standalone, live events are limited to events in the current UI process. To watch events while running an agent, use `loom run ... --ui 8080`.
 
 ### 6. Agent YAML Guide
 
