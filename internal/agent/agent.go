@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alanjchuang/goagent/internal/checkpoint"
 	"github.com/alanjchuang/goagent/internal/config"
 	"github.com/alanjchuang/goagent/internal/hooks"
 	"github.com/alanjchuang/goagent/internal/llm"
@@ -32,6 +33,21 @@ type Agent struct {
 	registry *tools.Registry
 	skills   *skills.Registry
 	hooks    *hooks.Manager
+
+	// checkpoint 相关（可选）。设置后每步保存状态，支持断点恢复。
+	ckpt        *checkpoint.Manager
+	ckptState   *checkpoint.State
+	resumeMsgs  []llm.Message // 恢复时预填的历史消息
+}
+
+// EnableCheckpoint 开启 checkpoint：每步持久化状态到 mgr，使用给定 state。
+// 若 state.Messages 非空，则作为恢复历史继续执行。
+func (a *Agent) EnableCheckpoint(mgr *checkpoint.Manager, state *checkpoint.State) {
+	a.ckpt = mgr
+	a.ckptState = state
+	if len(state.Messages) > 0 {
+		a.resumeMsgs = state.Messages
+	}
 }
 
 // New 根据 agent 配置构建 Agent，加载其工具与 LLM 客户端。
@@ -132,6 +148,11 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 		{Role: llm.RoleSystem, Content: a.buildSystemPrompt()},
 		{Role: llm.RoleUser, Content: task},
 	}
+	// 断点恢复：若有持久化的历史消息，则在其基础上继续。
+	if len(a.resumeMsgs) > 0 {
+		messages = a.resumeMsgs
+		logging.Get().Info("从 checkpoint 恢复: %d 条历史消息", len(messages))
+	}
 	schemas := a.registry.Schemas()
 
 	for step := 1; step <= maxSteps; step++ {
@@ -154,6 +175,7 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 		// auto 模式：根据响应是否含原生 tool_calls 更新检测状态。
 		a.client.UpdateNativeDetection(resp)
 		messages = append(messages, *resp)
+		a.saveCheckpoint(messages, checkpoint.StatusRunning, "")
 
 		// 无原生 tool_calls：先尝试从文本内容中解析工具调用（兼容不支持原生
 		// tool_call 的模型），解析不到再把文本当作最终答复。
@@ -229,11 +251,33 @@ func (a *Agent) execTool(name, argsJSON string) string {
 	return result
 }
 
-// fireComplete 触发 TaskComplete hook。
+// fireComplete 触发 TaskComplete hook，并把 checkpoint 标记为已完成。
 func (a *Agent) fireComplete(result string) {
 	a.hooks.Fire(hooks.TaskComplete, hooks.Context{
 		Event: string(hooks.TaskComplete), AgentName: a.cfg.Name, ToolResult: result,
 	})
+	if a.ckpt != nil && a.ckptState != nil {
+		a.ckptState.Status = checkpoint.StatusCompleted
+		a.ckptState.Result = result
+		if err := a.ckpt.Save(a.ckptState); err != nil {
+			logging.Get().Warn("保存 checkpoint(completed) 失败: %v", err)
+		}
+	}
+}
+
+// saveCheckpoint 持久化当前对话与状态（若开启了 checkpoint）。
+func (a *Agent) saveCheckpoint(messages []llm.Message, status checkpoint.Status, result string) {
+	if a.ckpt == nil || a.ckptState == nil {
+		return
+	}
+	a.ckptState.Messages = messages
+	a.ckptState.Status = status
+	if result != "" {
+		a.ckptState.Result = result
+	}
+	if err := a.ckpt.Save(a.ckptState); err != nil {
+		logging.Get().Warn("保存 checkpoint 失败: %v", err)
+	}
 }
 
 // Usage 返回累计 token 用量。
