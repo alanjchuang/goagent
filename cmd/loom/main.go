@@ -19,6 +19,7 @@ import (
 	"github.com/alanjchuang/goagent/internal/agent"
 	"github.com/alanjchuang/goagent/internal/checkpoint"
 	"github.com/alanjchuang/goagent/internal/config"
+	"github.com/alanjchuang/goagent/internal/heartbeat"
 	"github.com/alanjchuang/goagent/internal/logging"
 )
 
@@ -84,8 +85,16 @@ func listTasksCmd() {
 		return
 	}
 	for _, s := range states {
+		status := string(s.Status)
+		// running 状态的任务，检测其心跳判断是否已崩溃。
+		if s.Status == checkpoint.StatusRunning {
+			mgr := checkpoint.NewManager(s.AgentName, logRootDir())
+			if heartbeat.DetectCrashed(mgr.HeartbeatPath(s.TaskID), 30*time.Second) {
+				status = "crashed (进程已死，可恢复)"
+			}
+		}
 		fmt.Printf("  [%s] %s  (%s)  %s\n  task: %s\n",
-			s.Status, s.TaskID, s.AgentName, s.UpdatedAt.Format("2006-01-02 15:04:05"),
+			status, s.TaskID, s.AgentName, s.UpdatedAt.Format("2006-01-02 15:04:05"),
 			truncate(s.Task, 60))
 	}
 }
@@ -209,6 +218,11 @@ func runCmd(args []string) {
 		}
 	}
 	ag.EnableCheckpoint(ckptMgr, state)
+
+	// 启动心跳：定期写心跳文件，供 list-tasks 检测崩溃任务。
+	hb := heartbeat.New(ckptMgr.HeartbeatPath(state.TaskID), ac.Name, 5*time.Second)
+	hb.Start()
+	defer hb.Stop()
 
 	fmt.Printf("======================================================\n")
 	fmt.Printf("应用: %s\n", ac.Name)

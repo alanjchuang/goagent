@@ -61,6 +61,11 @@ func (m *Manager) statePath(taskID string) string {
 	return filepath.Join(m.taskDir(taskID), "state.json")
 }
 
+// HeartbeatPath 返回某任务的心跳文件路径。
+func (m *Manager) HeartbeatPath(taskID string) string {
+	return filepath.Join(m.taskDir(taskID), "heartbeat.json")
+}
+
 // NewTaskID 生成一个新的 task id。
 func NewTaskID() string {
 	return fmt.Sprintf("task_%d", time.Now().UnixNano())
