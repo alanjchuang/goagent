@@ -4,7 +4,9 @@
 //   - GET /                 返回内嵌的新手友好单页前端
 //   - GET /events           SSE 端点，实时推送 agent 执行事件
 //   - GET /api/workflows    返回 applications 下可执行的 workflow YAML 列表
-//   - POST /api/run         执行选中的 workflow/application
+//   - POST /api/run         创建一次异步 workflow/application 执行
+//   - GET /api/runs         返回 Web UI 创建的执行历史
+//   - GET /api/runs/{id}    返回某次执行的隔离结果
 //   - POST /api/chat        直接和默认/指定模型对话
 //   - GET /api/logs         返回本地 run.log 列表
 //   - GET /api/logs/{agent}/{run} 返回某次运行的 run.log 文本
@@ -22,6 +24,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alanjchuang/goagent/internal/agent"
@@ -67,6 +70,11 @@ const indexHTML = `<!DOCTYPE html>
   .workflow-card, .log-item { padding:10px 12px; margin:6px 0; border-radius:8px; background:#313244; cursor:pointer; border:1px solid transparent; }
   .workflow-card:hover, .log-item:hover { background:#45475a; }
   .workflow-card.selected { border-color:#89b4fa; }
+  .run-item { padding:10px 12px; margin:6px 0; border-radius:8px; background:#313244; border-left:4px solid #89b4fa; cursor:pointer; }
+  .run-item:hover { background:#45475a; }
+  .run-item.running { border-left-color:#f9e2af; }
+  .run-item.succeeded { border-left-color:#a6e3a1; }
+  .run-item.failed { border-left-color:#f38ba8; }
   .pill { display:inline-block; padding:2px 7px; border-radius:999px; background:#45475a; color:#cdd6f4; font-size:11px; margin-left:6px; }
   .ev { padding:8px 12px; margin:5px 0; border-radius:8px; background:#313244; border-left:4px solid #89b4fa; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; }
   .ev .t { color:#a6e3a1; font-weight:bold; }
@@ -86,7 +94,7 @@ const indexHTML = `<!DOCTYPE html>
 <main>
   <div class="tabs">
     <button id="tabChat" class="active" onclick="showTab('chat')">💬 和模型对话</button>
-    <button id="tabApps" onclick="showTab('apps'); loadWorkflows();">🚀 执行 Applications</button>
+    <button id="tabApps" onclick="showTab('apps'); loadWorkflows(); loadRuns(); ensureRunPoller();">🚀 执行 Applications</button>
     <button id="tabEvents" onclick="showTab('events')">📡 实时事件</button>
     <button id="tabLogs" onclick="showTab('logs'); loadLogs();">📜 本地日志</button>
   </div>
@@ -117,10 +125,12 @@ const indexHTML = `<!DOCTYPE html>
         <input id="runPath" placeholder="applications/demo/workflows/demo_agent.yaml">
         <label>任务描述</label>
         <textarea id="runTask" placeholder="例如：分析当前项目，并用小白能懂的话总结"></textarea>
-        <button class="primary" id="runBtn" onclick="runWorkflow()">运行应用</button>
+        <button class="primary" id="runBtn" onclick="runWorkflow()">新建执行</button>
         <span id="runStatus" class="status"></span>
-        <label>执行结果</label>
-        <div id="runOutput" class="output">尚未运行。</div>
+        <label>历史执行结果（互相隔离，可同时跑多个）</label>
+        <div id="runHistory" class="output">尚未运行。</div>
+        <label>当前选中执行详情</label>
+        <div id="runOutput" class="output">选择一条历史执行查看结果。</div>
       </div>
     </div>
   </section>
@@ -140,6 +150,8 @@ const indexHTML = `<!DOCTYPE html>
 <script>
   let chatHistory = [];
   let selectedWorkflow = '';
+  let runPoller = 0;
+  let selectedRunID = '';
 
   function esc(s){return String(s || '').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
   function showTab(name){
@@ -208,18 +220,55 @@ const indexHTML = `<!DOCTYPE html>
     const path = document.getElementById('runPath').value.trim();
     const task = document.getElementById('runTask').value.trim();
     if (!path) { alert('请选择或填写 workflow YAML 路径'); return; }
-    const btn = document.getElementById('runBtn');
     const st = document.getElementById('runStatus');
-    const out = document.getElementById('runOutput');
-    btn.disabled = true; st.textContent = '运行中，可切到实时事件查看过程...'; out.textContent = '运行中...';
+    st.textContent = '正在创建执行，可继续新建其它执行...';
     try {
       const data = await postJSON('/api/run', {path:path, task:task});
-      out.textContent = data.result || '';
-      st.textContent = '完成，用时 '+(data.duration_ms||0)+' ms';
+      selectedRunID = data.id;
+      st.textContent = '已创建执行 '+data.id+'，可切到实时事件查看过程，也可继续新建任务。';
+      await loadRuns();
+      ensureRunPoller();
     } catch(e) {
-      out.textContent = '执行失败：' + e.message;
-      st.innerHTML = '<span class="danger">失败</span>';
-    } finally { btn.disabled = false; }
+      st.innerHTML = '<span class="danger">创建失败：'+esc(e.message)+'</span>';
+    }
+  }
+  function ensureRunPoller(){
+    if (runPoller) return;
+    runPoller = setInterval(loadRuns, 2000);
+  }
+  async function loadRuns(){
+    const box = document.getElementById('runHistory');
+    try {
+      const resp = await fetch('/api/runs');
+      const runs = await resp.json();
+      if (!runs.length) { box.textContent = '尚未运行。'; return; }
+      box.innerHTML = '';
+      let hasRunning = false;
+      runs.forEach(r => {
+        if (r.status === 'running') hasRunning = true;
+        const div = document.createElement('div');
+        div.className = 'run-item ' + r.status;
+        div.innerHTML = '<b>'+esc(r.name || r.path)+'</b><span class="pill">'+esc(r.status)+'</span><div class="muted">'+esc(r.id)+' · '+esc(r.path)+' · '+new Date(r.created_at).toLocaleString()+'</div><div>'+esc((r.task||'').slice(0,120))+'</div>';
+        div.onclick = () => selectRun(r.id);
+        box.appendChild(div);
+      });
+      if (!hasRunning && runPoller) { clearInterval(runPoller); runPoller = 0; }
+      if (selectedRunID) await selectRun(selectedRunID, true);
+    } catch(e) {
+      box.innerHTML = '<span class="danger">加载历史失败：'+esc(e.message)+'</span>';
+    }
+  }
+  async function selectRun(id, quiet){
+    selectedRunID = id;
+    const out = document.getElementById('runOutput');
+    if (!quiet) out.textContent = '加载中...';
+    try {
+      const resp = await fetch('/api/runs/' + encodeURIComponent(id));
+      const r = await resp.json();
+      out.textContent = '执行ID: '+r.id+'\n状态: '+r.status+'\n应用: '+r.path+'\n任务: '+(r.task||'')+'\n开始: '+new Date(r.created_at).toLocaleString()+'\n结束: '+(r.finished_at ? new Date(r.finished_at).toLocaleString() : '-')+'\n耗时: '+(r.duration_ms||0)+' ms\n\n' + (r.error ? ('错误:\n'+r.error+'\n\n') : '') + '结果:\n' + (r.result || '暂无结果');
+    } catch(e) {
+      out.textContent = '加载执行详情失败：' + e.message;
+    }
   }
 
   const es = new EventSource('/events');
@@ -298,8 +347,80 @@ type runRequest struct {
 }
 
 type runResponse struct {
-	Result     string `json:"result"`
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+// RunRecord 是 Web UI 中一次 application 执行的隔离历史记录。
+type RunRecord struct {
+	ID         string `json:"id"`
+	Path       string `json:"path"`
+	Name       string `json:"name"`
+	Task       string `json:"task"`
+	Status     string `json:"status"` // running / succeeded / failed
+	Result     string `json:"result,omitempty"`
+	Error      string `json:"error,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	FinishedAt string `json:"finished_at,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
+}
+
+type runStore struct {
+	mu    sync.RWMutex
+	runs  map[string]*RunRecord
+	order []string
+}
+
+var uiRuns = &runStore{runs: make(map[string]*RunRecord)}
+
+func (s *runStore) add(r *RunRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runs[r.ID] = r
+	s.order = append([]string{r.ID}, s.order...)
+	if len(s.order) > 100 {
+		old := s.order[100:]
+		s.order = s.order[:100]
+		for _, id := range old {
+			delete(s.runs, id)
+		}
+	}
+}
+
+func (s *runStore) list() []RunRecord {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]RunRecord, 0, len(s.order))
+	for _, id := range s.order {
+		if r, ok := s.runs[id]; ok {
+			out = append(out, *r)
+		}
+	}
+	return out
+}
+
+func (s *runStore) get(id string) (*RunRecord, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.runs[id]
+	if !ok {
+		return nil, false
+	}
+	copy := *r
+	return &copy, true
+}
+
+func (s *runStore) finish(id, status, result, errMsg string, started time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.runs[id]; ok {
+		r.Status = status
+		r.Result = result
+		r.Error = errMsg
+		r.FinishedAt = time.Now().Format(time.RFC3339Nano)
+		r.DurationMS = time.Since(started).Milliseconds()
+	}
 }
 
 // StartServer 在指定端口启动 Web UI 服务器（阻塞）。
@@ -316,6 +437,8 @@ func StartServer(port int) error {
 	mux.HandleFunc("/events", handleSSE)
 	mux.HandleFunc("/api/workflows", handleWorkflows)
 	mux.HandleFunc("/api/run", handleRun)
+	mux.HandleFunc("/api/runs", handleRunsList)
+	mux.HandleFunc("/api/runs/", handleRunDetail)
 	mux.HandleFunc("/api/chat", handleChat)
 	mux.HandleFunc("/api/logs", handleLogsList)
 	mux.HandleFunc("/api/logs/", handleLogContent)
@@ -409,13 +532,57 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "workflow path must be under applications and end with .yaml/.yml", http.StatusBadRequest)
 		return
 	}
-	start := time.Now()
-	result, err := agent.RunApp(req.Path, strings.TrimSpace(req.Task))
+	name := filepath.Base(req.Path)
+	if ac, err := config.LoadAgentConfig(req.Path); err == nil && ac.Name != "" {
+		name = ac.Name
+	}
+	createdAt := time.Now()
+	run := &RunRecord{
+		ID:        fmt.Sprintf("run_%d", createdAt.UnixNano()),
+		Path:      req.Path,
+		Name:      name,
+		Task:      strings.TrimSpace(req.Task),
+		Status:    "running",
+		CreatedAt: createdAt.Format(time.RFC3339Nano),
+	}
+	uiRuns.add(run)
+	go executeRun(run.ID, req.Path, run.Task, createdAt)
+	writeJSON(w, runResponse{ID: run.ID, Status: run.Status, CreatedAt: run.CreatedAt})
+}
+
+func executeRun(id, path, task string, started time.Time) {
+	result, err := agent.RunApp(path, task)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		uiRuns.finish(id, "failed", "", err.Error(), started)
 		return
 	}
-	writeJSON(w, runResponse{Result: result, DurationMS: time.Since(start).Milliseconds()})
+	uiRuns.finish(id, "succeeded", result, "", started)
+}
+
+func handleRunsList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, uiRuns.list())
+}
+
+func handleRunDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/runs/")
+	if !safePathSegment(id) {
+		http.Error(w, "bad run id", http.StatusBadRequest)
+		return
+	}
+	run, ok := uiRuns.get(id)
+	if !ok {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, run)
 }
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
