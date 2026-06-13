@@ -13,6 +13,7 @@ import (
 
 	"github.com/alanjchuang/goagent/internal/config"
 	"github.com/alanjchuang/goagent/internal/llm"
+	"github.com/alanjchuang/goagent/internal/logging"
 	"github.com/alanjchuang/goagent/internal/toolparse"
 	"github.com/alanjchuang/goagent/internal/tools"
 )
@@ -91,6 +92,7 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 
 	for step := 1; step <= maxSteps; step++ {
 		fmt.Printf("\n──────── Step %d ────────\n", step)
+		logging.Get().Info("Step %d 开始 [tool_call 模式: %s]", step, a.client.NativeMode())
 		// 三态检测：决定本次是否携带 tool schema（原生 tool_call）还是靠文本解析。
 		var sentSchemas []llm.ToolSchema
 		if a.client.UseNativeToolCalls() {

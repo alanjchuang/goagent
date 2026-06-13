@@ -17,6 +17,7 @@ import (
 
 	"github.com/alanjchuang/goagent/internal/agent"
 	"github.com/alanjchuang/goagent/internal/config"
+	"github.com/alanjchuang/goagent/internal/logging"
 )
 
 func main() {
@@ -52,6 +53,7 @@ func usage() {
 func runCmd(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	taskOverride := fs.String("task", "", "覆盖 YAML 中的 description 作为任务文本")
+	logToFile := fs.Bool("log-to-file", false, "把日志归档到 .logs/<agent>/<时间戳>/run.log")
 
 	// Go 的 flag 包遇到第一个位置参数就停止解析后续 flag。
 	// 这里把 flag 与位置参数重排（flag 在前），以支持 `run <yaml> --task ...` 的写法。
@@ -77,6 +79,23 @@ func runCmd(args []string) {
 		os.Exit(1)
 	}
 
+	// 2.1 初始化结构化日志。
+	logLevel := config.C.System.Logging.Level
+	if logLevel == "" {
+		logLevel = "INFO"
+	}
+	logDir := config.C.System.Logging.Dir
+	if logDir == "" {
+		logDir = ".logs"
+	}
+	log := logging.Init(logging.Options{
+		AgentName: ac.Name,
+		Level:     logLevel,
+		Dir:       logDir,
+		ToFile:    *logToFile,
+	})
+	defer log.Close()
+
 	// 3. 决定任务文本。
 	task := ac.Description
 	if *taskOverride != "" {
@@ -94,15 +113,21 @@ func runCmd(args []string) {
 	fmt.Printf("应用: %s\n", ac.Name)
 	fmt.Printf("模型类型: %s\n", ac.ModelType)
 	fmt.Printf("任务: %s\n", task)
+	if rd := log.RunDir(); rd != "" {
+		fmt.Printf("日志归档: %s\n", rd)
+	}
 	fmt.Printf("======================================================\n")
+	log.Info("开始执行任务: %s", task)
 
 	result, err := ag.Run(context.Background(), task)
 	if err != nil {
+		log.Error("执行失败: %v", err)
 		fmt.Fprintf(os.Stderr, "\n执行失败: %v\n", err)
 		os.Exit(1)
 	}
 
 	usage := ag.Usage()
+	log.Info("执行完成。Token 用量: 输入=%d 输出=%d", usage.InputTokens, usage.OutputTokens)
 	fmt.Printf("\n======================================================\n")
 	fmt.Printf("执行完成。Token 用量: 输入=%d 输出=%d\n", usage.InputTokens, usage.OutputTokens)
 	fmt.Printf("======================================================\n")
