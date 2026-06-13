@@ -33,21 +33,19 @@ func (ShellTool) Parameters() map[string]any {
 	}
 }
 
-// dangerousPatterns 是最基础的危险命令拦截（对应 Python 版 security.py 的极简子集）。
-var dangerousPatterns = []string{
-	"rm -rf /", "rm -rf /*", "mkfs", ":(){:|:&};:", "> /dev/sda", "dd if=",
-}
+// activePolicy 是当前生效的安全策略，由 RegisterBuiltins 设置；默认较宽松但拦截高危。
+var activePolicy = DefaultSecurityPolicy()
+
+// SetPolicy 设置全局安全策略（供 agent 在加载配置后调用）。
+func SetPolicy(p SecurityPolicy) { activePolicy = p }
 
 func (ShellTool) Execute(args map[string]any) (string, error) {
 	command := strArg(args, "command")
 	if command == "" {
 		return "", fmt.Errorf("缺少参数 command")
 	}
-	lc := strings.ToLower(command)
-	for _, p := range dangerousPatterns {
-		if strings.Contains(lc, p) {
-			return "", fmt.Errorf("命令被安全策略拦截: 包含危险模式 %q", p)
-		}
+	if err := activePolicy.CheckCommand(command); err != nil {
+		return "", err
 	}
 
 	cmd := exec.Command("sh", "-c", command)

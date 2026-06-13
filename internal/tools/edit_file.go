@@ -40,6 +40,9 @@ func (EditFile) Execute(args map[string]any) (string, error) {
 	if oldStr == "" {
 		return "", fmt.Errorf("缺少参数 old_string")
 	}
+	if err := activePolicy.CheckPath(path); err != nil {
+		return "", err
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {

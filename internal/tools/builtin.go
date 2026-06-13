@@ -29,6 +29,9 @@ func (ReadFile) Execute(args map[string]any) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("缺少参数 file_path")
 	}
+	if err := activePolicy.CheckPath(path); err != nil {
+		return "", err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -57,6 +60,9 @@ func (WriteFile) Execute(args map[string]any) (string, error) {
 	content := strArg(args, "content")
 	if path == "" {
 		return "", fmt.Errorf("缺少参数 file_path")
+	}
+	if err := activePolicy.CheckPath(path); err != nil {
+		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
