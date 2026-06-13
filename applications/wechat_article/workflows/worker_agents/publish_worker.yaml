@@ -40,6 +40,7 @@ workflow: |
      - 若缺少 cover_image_path/thumb_media_id、HTML content、微信凭证，则调用 wechat_create_draft dry_run=true 输出缺失项和 payload，不声称创建成功。
      - 若信息齐全且凭证已配置，则调用 wechat_create_draft dry_run=false 创建草稿。
      - 创建草稿后最终状态为 draft_created；否则为 draft_package_ready 或 blocked。
+     - 传给 wechat_create_draft 的 content 必须是纯 HTML 字符串，不要包裹 `<![CDATA[ ... ]]>`，不要带 ```html 代码围栏；微信 draft/add 的 JSON 字段会自行承载 HTML。
 
   ## 输出格式
   - 草稿包摘要

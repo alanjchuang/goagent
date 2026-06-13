@@ -256,6 +256,7 @@ func buildWeChatDraftArticle(args map[string]any) (wechatDraftArticle, error) {
 	if content == "" {
 		return wechatDraftArticle{}, fmt.Errorf("缺少参数 content 或 content_file")
 	}
+	content = sanitizeWeChatHTMLContent(content)
 	return wechatDraftArticle{
 		ArticleType:        firstNonEmpty(strings.TrimSpace(strArg(args, "article_type")), "news"),
 		Title:              title,
@@ -267,6 +268,33 @@ func buildWeChatDraftArticle(args map[string]any) (wechatDraftArticle, error) {
 		NeedOpenComment:    intArgDefault(args, "need_open_comment", 0),
 		OnlyFansCanComment: intArgDefault(args, "only_fans_can_comment", 0),
 	}, nil
+}
+
+func sanitizeWeChatHTMLContent(content string) string {
+	content = strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
+	content = stripMarkdownFence(content)
+
+	// 微信 draft/add 的 content 是 JSON 字符串字段，不需要也不应该包 CDATA。
+	// 有些模型会把 HTML 放进 <![CDATA[ ... ]]>，微信会把 CDATA 文本原样展示。
+	cdataRe := regexp.MustCompile(`(?is)^\s*<\s*!\s*\[CDATA\[\s*([\s\S]*?)\s*\]\]>\s*$`)
+	if m := cdataRe.FindStringSubmatch(content); len(m) == 2 {
+		return strings.TrimSpace(m[1])
+	}
+	cdataStartRe := regexp.MustCompile(`(?is)^\s*<\s*!\s*\[CDATA\[\s*`)
+	if cdataStartRe.MatchString(content) {
+		content = cdataStartRe.ReplaceAllString(content, "")
+		content = regexp.MustCompile(`(?is)\s*\]\]>\s*$`).ReplaceAllString(content, "")
+		return strings.TrimSpace(content)
+	}
+	return content
+}
+
+func stripMarkdownFence(content string) string {
+	fenceRe := regexp.MustCompile("(?is)^\\s*```(?:html|xml)?\\s*\\n([\\s\\S]*?)\\n```\\s*$")
+	if m := fenceRe.FindStringSubmatch(content); len(m) == 2 {
+		return strings.TrimSpace(m[1])
+	}
+	return content
 }
 
 func resolveWeChatConfig(args map[string]any) wechatToolConfig {

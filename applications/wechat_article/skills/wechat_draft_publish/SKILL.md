@@ -41,6 +41,7 @@ invocation-control:
 - `title` 已生成，建议不超过 32 个字。
 - `digest` 已生成，建议不超过 128 个字。
 - `content` 或 `content_file` 是微信公众号可用 HTML。
+- 正文 HTML 必须直接以 `<section>`、`<p>` 等标签开始；不要包裹 `<![CDATA[ ... ]]>`，也不要输出 Markdown 代码围栏。
 - 有封面：`cover_image_path` 或已上传好的 `thumb_media_id`。
 - 正文图片如果是本地路径，应尽量为 jpg/png，且单图小于 1MB；否则微信上传可能失败。
 - CTA 已按用户要求处理：默认以前期引流为主，资料包领取只是可选项。
@@ -88,4 +89,5 @@ invocation-control:
 - 不要默认群发。
 - 不要泄露 AppSecret、access token。
 - 不要把本地图片路径直接留在最终微信 HTML 里。
+- 不要在正文 content 中保留 `<![CDATA[`、`]]>`、```html 代码围栏等包装文本；微信草稿 API 接收的是 JSON 字符串字段，不需要 CDATA。
 - 不要声称“已发布”，除非后续明确接入并调用群发/发布接口。
