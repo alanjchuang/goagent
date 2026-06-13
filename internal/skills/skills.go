@@ -34,8 +34,9 @@ type Skill struct {
 	Description string
 	Version     string
 	Mode        Mode
-	Body        string // SKILL.md 的正文（frontmatter 之后的部分）
-	Dir         string // skill 目录绝对路径
+	Body        string         // SKILL.md 的正文（frontmatter 之后的部分）
+	Dir         string         // skill 目录绝对路径
+	Hooks       map[string]any // frontmatter 中的 hooks 段（原样保留，供 hooks 包解析）
 }
 
 // frontmatter 是 SKILL.md 头部的 YAML。
@@ -46,6 +47,7 @@ type frontmatter struct {
 	InvocationControl struct {
 		AllowModel any `yaml:"allow-model"` // true / false / "force-inject"
 	} `yaml:"invocation-control"`
+	Hooks map[string]any `yaml:"hooks"`
 }
 
 // Registry 持有一组已加载的 skill。
@@ -110,6 +112,7 @@ func loadSkillFile(path string) (*Skill, error) {
 		Mode:        resolveMode(meta.InvocationControl.AllowModel),
 		Body:        strings.TrimSpace(body),
 		Dir:         filepath.Dir(path),
+		Hooks:       meta.Hooks,
 	}, nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/alanjchuang/goagent/internal/config"
+	"github.com/alanjchuang/goagent/internal/hooks"
 	"github.com/alanjchuang/goagent/internal/llm"
 	"github.com/alanjchuang/goagent/internal/logging"
 	"github.com/alanjchuang/goagent/internal/skills"
@@ -29,6 +30,7 @@ type Agent struct {
 	client   *llm.Client
 	registry *tools.Registry
 	skills   *skills.Registry
+	hooks    *hooks.Manager
 }
 
 // New 根据 agent 配置构建 Agent，加载其工具与 LLM 客户端。
@@ -71,10 +73,18 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 		reg.Register(&skills.LoadSkillTool{Reg: skReg})
 	}
 
+	// 从所有 skill 的 frontmatter 注册生命周期 hook。
+	hookMgr := hooks.NewManager()
+	for _, s := range skReg.All() {
+		if len(s.Hooks) > 0 {
+			hookMgr.RegisterFromSkill(s.Hooks, s.Dir, s.Name)
+		}
+	}
+
 	// 始终注册 final_answer，供模型结束任务。
 	reg.Register(&finalAnswerTool{})
 
-	return &Agent{cfg: cfg, client: client, registry: reg, skills: skReg}, nil
+	return &Agent{cfg: cfg, client: client, registry: reg, skills: skReg, hooks: hookMgr}, nil
 }
 
 // buildSystemPrompt 构造系统提示词（对应 Python 版 prompt_builder）。
@@ -114,6 +124,9 @@ func (a *Agent) buildSystemPrompt() string {
 
 // Run 执行 agent，task 为任务文本，返回最终答复。
 func (a *Agent) Run(ctx context.Context, task string) (string, error) {
+	a.hooks.Fire(hooks.TaskStart, hooks.Context{
+		Event: string(hooks.TaskStart), AgentName: a.cfg.Name, Task: task,
+	})
 	messages := []llm.Message{
 		{Role: llm.RoleSystem, Content: a.buildSystemPrompt()},
 		{Role: llm.RoleUser, Content: task},
@@ -144,12 +157,10 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 				if call.Name == "final_answer" {
 					ans := extractFinalAnswer(call.Arguments)
 					fmt.Printf("[final_answer] %s\n", ans)
+					a.fireComplete(ans)
 					return ans, nil
 				}
-				result, err := a.registry.Execute(call.Name, call.Arguments)
-				if err != nil {
-					result = "工具执行错误: " + err.Error()
-				}
+				result := a.execTool(call.Name, call.Arguments)
 				printToolResult(result)
 				// 文本解析出的工具调用没有 tool_call_id，回填为 user 消息。
 				messages = append(messages, llm.Message{
@@ -160,6 +171,7 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 			}
 			if strings.TrimSpace(resp.Content) != "" {
 				fmt.Printf("[assistant] %s\n", resp.Content)
+				a.fireComplete(resp.Content)
 				return resp.Content, nil
 			}
 			// 既无工具调用也无内容，提示模型继续。
@@ -177,13 +189,11 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 			if tc.Function.Name == "final_answer" {
 				ans := extractFinalAnswer(tc.Function.Arguments)
 				fmt.Printf("[final_answer] %s\n", ans)
+				a.fireComplete(ans)
 				return ans, nil
 			}
 
-			result, err := a.registry.Execute(tc.Function.Name, tc.Function.Arguments)
-			if err != nil {
-				result = "工具执行错误: " + err.Error()
-			}
+			result := a.execTool(tc.Function.Name, tc.Function.Arguments)
 			printToolResult(result)
 
 			messages = append(messages, llm.Message{
@@ -195,6 +205,29 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("达到最大步数 %d 仍未完成任务", maxSteps)
+}
+
+// execTool 执行一个工具调用，并在前后触发 Pre/PostToolUse hook。
+func (a *Agent) execTool(name, argsJSON string) string {
+	a.hooks.Fire(hooks.PreToolUse, hooks.Context{
+		Event: string(hooks.PreToolUse), ToolName: name, ToolArgs: argsJSON, AgentName: a.cfg.Name,
+	})
+	result, err := a.registry.Execute(name, argsJSON)
+	if err != nil {
+		result = "工具执行错误: " + err.Error()
+	}
+	a.hooks.Fire(hooks.PostToolUse, hooks.Context{
+		Event: string(hooks.PostToolUse), ToolName: name, ToolArgs: argsJSON,
+		ToolResult: result, AgentName: a.cfg.Name,
+	})
+	return result
+}
+
+// fireComplete 触发 TaskComplete hook。
+func (a *Agent) fireComplete(result string) {
+	a.hooks.Fire(hooks.TaskComplete, hooks.Context{
+		Event: string(hooks.TaskComplete), AgentName: a.cfg.Name, ToolResult: result,
+	})
 }
 
 // Usage 返回累计 token 用量。
