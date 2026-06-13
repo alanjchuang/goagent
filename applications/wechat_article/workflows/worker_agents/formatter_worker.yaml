@@ -20,8 +20,8 @@ workflow: |
      - 列表适合移动端阅读
      - 图片使用占位符，例如 {{cover_image}}、{{image_1}}
   3. 生成草稿字段：title、author、digest、content、content_source_url、thumb_media_id_placeholder、need_open_comment。
-  4. 插入变现 CTA，但保持自然、克制、合规。
-  5. 输出发布前人工替换项列表，例如二维码、CPS 链接、封面 media_id。
+  4. 插入 CTA 时保持自然、克制、合规；默认以前期引流为主（关注、回复关键词、加企微/入群、预约咨询、查看合集），资料包领取仅作为可选 CTA，不要默认强行加入。
+  5. 输出发布前人工替换项列表，例如二维码、CPS 链接、封面 media_id；如果 cta_enabled=false，则不要插入 CTA 模块。
 
   ## 输出格式
   - Markdown 版本
@@ -33,4 +33,3 @@ workflow: |
 tools: []
 
 worker_agents: []
-

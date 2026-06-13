@@ -12,7 +12,7 @@ workflow: |
   根据 supervisor 给出的领域、目标读者和变现目标，产出可变现公众号选题。
 
   ## 步骤
-  1. 使用 web_search 搜索近期趋势、行业信息、竞品文章、用户痛点和关键词；最多调用 2 次 web_search，优先把多个关键词合并到一次搜索中。
+  1. 使用 volc_web_search 搜索近期趋势、行业信息、竞品文章、用户痛点和关键词；最多调用 2 次 volc_web_search，优先把多个关键词合并到一次搜索中。
   2. 生成 3-5 个候选选题，每个选题包含：
      - 标题方向
      - 目标人群
@@ -37,6 +37,6 @@ workflow: |
   - 风险提醒
 
 tools:
-  - name: "web_search"
+  - name: "volc_web_search"
 
 worker_agents: []

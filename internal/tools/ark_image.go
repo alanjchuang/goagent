@@ -2,10 +2,15 @@ package tools
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,13 +21,14 @@ import (
 )
 
 const defaultArkImageModel = "doubao-seedream-4-0-250828"
+const defaultArkImageModelType = "image"
 
-// ArkGenerateImages 调用火山方舟文生图接口，返回图片 URL。
+// ArkGenerateImages 调用火山方舟文生图接口，返回图片 URL，并默认下载到 outputs/。
 type ArkGenerateImages struct{}
 
 func (ArkGenerateImages) Name() string { return "ark_generate_images" }
 func (ArkGenerateImages) Description() string {
-	return "调用火山方舟图片生成 API 生成图片，返回图片 URL、尺寸、用量和错误信息。适合公众号封面、正文插图、金句图等。"
+	return "调用火山方舟图片生成 API 生成图片，返回图片 URL、本地文件路径、尺寸、用量和错误信息。适合公众号封面、正文插图、金句图等。"
 }
 func (ArkGenerateImages) Parameters() map[string]any {
 	return map[string]any{
@@ -52,6 +58,14 @@ func (ArkGenerateImages) Parameters() map[string]any {
 				"type":        "string",
 				"description": "连续生图模式：auto 或 disabled，默认 auto。",
 			},
+			"download_images": map[string]any{
+				"type":        "boolean",
+				"description": "是否下载生成图片到本地 outputs/，默认 true。",
+			},
+			"output_dir": map[string]any{
+				"type":        "string",
+				"description": "图片下载目录，默认 outputs/images/generated。",
+			},
 		},
 		"required": []string{"prompt"},
 	}
@@ -63,25 +77,19 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 		return "", fmt.Errorf("缺少参数 prompt")
 	}
 
-	apiKey := strings.TrimSpace(os.Getenv("ARK_IMAGE_API_KEY"))
+	mc, hasImageConfig := arkImageModelConfig()
+	apiKey := firstNonEmpty(
+		os.Getenv("ARK_IMAGE_API_KEY"),
+		configValue(hasImageConfig, mc.APIKey),
+		os.Getenv("ARK_API_KEY"),
+	)
 	if apiKey == "" {
-		apiKey = strings.TrimSpace(os.Getenv("ARK_API_KEY"))
-	}
-	if apiKey == "" && config.C != nil {
-		if mc, err := config.C.LLM.ForType(""); err == nil {
-			apiKey = strings.TrimSpace(mc.APIKey)
-		}
-	}
-	if apiKey == "" {
-		return "", fmt.Errorf("缺少火山方舟 API Key：请设置 ARK_IMAGE_API_KEY 或 ARK_API_KEY，或在 config/llm.yaml 中配置默认模型 api_key")
+		return "", fmt.Errorf("缺少火山方舟图片 API Key：请在 config/llm.yaml 的 model.image.api_key 中配置，或设置 ARK_IMAGE_API_KEY / ARK_API_KEY")
 	}
 
 	imageModel := strings.TrimSpace(strArg(args, "model"))
 	if imageModel == "" {
-		imageModel = strings.TrimSpace(os.Getenv("ARK_IMAGE_MODEL"))
-	}
-	if imageModel == "" {
-		imageModel = defaultArkImageModel
+		imageModel = firstNonEmpty(os.Getenv("ARK_IMAGE_MODEL"), configValue(hasImageConfig, mc.Model), defaultArkImageModel)
 	}
 
 	size := strings.TrimSpace(strArg(args, "size"))
@@ -101,6 +109,11 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 		sequential = model.SequentialImageGenerationAuto
 	}
 	seq := model.SequentialImageGeneration(sequential)
+	downloadImages := boolArgDefault(args, "download_images", true)
+	outputDir := strings.TrimSpace(strArg(args, "output_dir"))
+	if outputDir == "" {
+		outputDir = "outputs/images/generated"
+	}
 
 	client := arkruntime.NewClientWithApiKey(apiKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -125,9 +138,11 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 	defer stream.Close()
 
 	type imageResult struct {
-		Index int64  `json:"index"`
-		Size  string `json:"size"`
-		URL   string `json:"url"`
+		Index       int64  `json:"index"`
+		Size        string `json:"size"`
+		URL         string `json:"url"`
+		LocalPath   string `json:"local_path,omitempty"`
+		DownloadErr string `json:"download_error,omitempty"`
 	}
 	type partialError struct {
 		Code    string `json:"code"`
@@ -170,7 +185,16 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 			}
 		case model.ImageGenerationStreamEventPartialSucceeded:
 			if recv.Error == nil && recv.Url != nil {
-				result.Images = append(result.Images, imageResult{Index: recv.ImageIndex, Size: recv.Size, URL: *recv.Url})
+				img := imageResult{Index: recv.ImageIndex, Size: recv.Size, URL: *recv.Url}
+				if downloadImages {
+					localPath, err := downloadImageToOutput(ctx, img.URL, outputDir, fmt.Sprintf("generated_%02d", recv.ImageIndex+1))
+					if err != nil {
+						img.DownloadErr = err.Error()
+					} else {
+						img.LocalPath = localPath
+					}
+				}
+				result.Images = append(result.Images, img)
 			}
 		case model.ImageGenerationStreamEventCompleted:
 			if recv.Error != nil {
@@ -187,12 +211,138 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 	return string(out), nil
 }
 
-// LicensedImageSearchStrategy 生成授权图库搜索策略，并可用 web_search 辅助检索来源线索。
+func arkImageModelConfig() (config.ModelConfig, bool) {
+	if config.C == nil {
+		return config.ModelConfig{}, false
+	}
+	modelType := firstNonEmpty(os.Getenv("ARK_IMAGE_MODEL_TYPE"), defaultArkImageModelType)
+	mc, err := config.C.LLM.ForType(modelType)
+	if err != nil {
+		return config.ModelConfig{}, false
+	}
+	return mc, true
+}
+
+func configValue(ok bool, value string) string {
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func downloadImageToOutput(ctx context.Context, imageURL, outputDir, filenamePrefix string) (string, error) {
+	imageURL = strings.TrimSpace(imageURL)
+	if imageURL == "" {
+		return "", fmt.Errorf("empty image url")
+	}
+	if outputDir == "" {
+		outputDir = "outputs/images"
+	}
+	if err := activePolicy.CheckPath(outputDir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create image download request failed: %w", err)
+	}
+	req.Header.Set("User-Agent", "goagent-image-downloader/1.0")
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download image failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("download image status=%d", resp.StatusCode)
+	}
+	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	if contentType != "" && !strings.HasPrefix(contentType, "image/") && !strings.Contains(contentType, "octet-stream") {
+		return "", fmt.Errorf("downloaded content is not image: %s", contentType)
+	}
+
+	ext := imageExtFromURLOrContentType(imageURL, contentType)
+	if filenamePrefix == "" {
+		filenamePrefix = "image"
+	}
+	h := sha1.Sum([]byte(imageURL))
+	filename := fmt.Sprintf("%s_%s%s", sanitizeFilename(filenamePrefix), hex.EncodeToString(h[:])[:10], ext)
+	path := filepath.Join(outputDir, filename)
+	if err := activePolicy.CheckPath(path); err != nil {
+		return "", err
+	}
+	out, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = out.Close() }()
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return "", fmt.Errorf("save image failed: %w", err)
+	}
+	return path, nil
+}
+
+func imageExtFromURLOrContentType(rawURL, contentType string) string {
+	if u, err := url.Parse(rawURL); err == nil {
+		if ext := strings.ToLower(filepath.Ext(u.Path)); ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif" {
+			return ext
+		}
+	}
+	switch {
+	case strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg"):
+		return ".jpg"
+	case strings.Contains(contentType, "png"):
+		return ".png"
+	case strings.Contains(contentType, "webp"):
+		return ".webp"
+	case strings.Contains(contentType, "gif"):
+		return ".gif"
+	default:
+		return ".jpg"
+	}
+}
+
+func sanitizeFilename(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "image"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "image"
+	}
+	if len(out) > 48 {
+		out = out[:48]
+	}
+	return out
+}
+
+// LicensedImageSearchStrategy 生成授权图库搜索策略，并可用 volc_web_search 辅助检索来源线索。
 type LicensedImageSearchStrategy struct{}
 
 func (LicensedImageSearchStrategy) Name() string { return "licensed_image_search_strategy" }
 func (LicensedImageSearchStrategy) Description() string {
-	return "为公众号配图生成网上找授权图策略：推荐图库、搜索关键词、版权记录模板和风险提示；可选调用 web_search 获取候选来源线索。"
+	return "为公众号配图生成网上找授权图策略：推荐图库、搜索关键词、版权记录模板和风险提示；可选调用 volc_web_search 获取候选来源线索。"
 }
 func (LicensedImageSearchStrategy) Parameters() map[string]any {
 	return map[string]any{
@@ -210,9 +360,13 @@ func (LicensedImageSearchStrategy) Parameters() map[string]any {
 				"type":        "string",
 				"description": "期望风格，例如科技感、极简、真实办公场景、插画。",
 			},
-			"run_web_search": map[string]any{
+			"run_search": map[string]any{
 				"type":        "boolean",
-				"description": "是否调用 web_search 获取候选来源线索，默认 false。",
+				"description": "是否调用 volc_web_search 获取候选网页来源线索，默认 false。",
+			},
+			"run_image_search": map[string]any{
+				"type":        "boolean",
+				"description": "是否调用 volc_web_search 的 image 搜索并下载候选图到 outputs/images/search，默认 false。",
 			},
 		},
 		"required": []string{"topic"},
@@ -242,16 +396,17 @@ func (LicensedImageSearchStrategy) Execute(args map[string]any) (string, error) 
 	}
 
 	type strategy struct {
-		Topic             string   `json:"topic"`
-		Usage             string   `json:"usage"`
-		Style             string   `json:"style"`
-		PreferredSources  []string `json:"preferred_sources"`
-		SearchQueries     []string `json:"search_queries"`
-		RejectSources     []string `json:"reject_sources"`
-		LicenseChecklist  []string `json:"license_checklist"`
-		AttributionRecord []string `json:"attribution_record_fields"`
-		RiskNotes         []string `json:"risk_notes"`
-		WebSearchSummary  string   `json:"web_search_summary,omitempty"`
+		Topic              string   `json:"topic"`
+		Usage              string   `json:"usage"`
+		Style              string   `json:"style"`
+		PreferredSources   []string `json:"preferred_sources"`
+		SearchQueries      []string `json:"search_queries"`
+		RejectSources      []string `json:"reject_sources"`
+		LicenseChecklist   []string `json:"license_checklist"`
+		AttributionRecord  []string `json:"attribution_record_fields"`
+		RiskNotes          []string `json:"risk_notes"`
+		SearchSummary      string   `json:"search_summary,omitempty"`
+		ImageSearchSummary string   `json:"image_search_summary,omitempty"`
 	}
 
 	result := strategy{
@@ -287,13 +442,28 @@ func (LicensedImageSearchStrategy) Execute(args map[string]any) (string, error) 
 		},
 	}
 
-	if boolArgDefault(args, "run_web_search", false) {
+	if boolArgDefault(args, "run_search", boolArgDefault(args, "run_web_search", false)) {
 		searchQuery := strings.Join(queries, " OR ")
-		out, err := (WebSearch{}).Execute(map[string]any{"query": searchQuery, "max_keyword": float64(5)})
+		out, err := (VolcWebSearch{}).Execute(map[string]any{"query": searchQuery, "count": float64(5)})
 		if err != nil {
-			result.WebSearchSummary = "web_search 调用失败: " + err.Error()
+			result.SearchSummary = "volc_web_search 调用失败: " + err.Error()
 		} else {
-			result.WebSearchSummary = out
+			result.SearchSummary = out
+		}
+	}
+	if boolArgDefault(args, "run_image_search", false) {
+		imageQuery := fmt.Sprintf("%s %s %s", topic, usage, style)
+		out, err := (VolcWebSearch{}).Execute(map[string]any{
+			"query":           imageQuery,
+			"count":           float64(5),
+			"search_type":     "image",
+			"download_images": true,
+			"output_dir":      "outputs/images/search",
+		})
+		if err != nil {
+			result.ImageSearchSummary = "volc_web_search image 调用失败: " + err.Error()
+		} else {
+			result.ImageSearchSummary = out
 		}
 	}
 

@@ -27,3 +27,28 @@ model:
     max_tokens: 4000
     timeout: 120
     num_retries: 3
+
+  # 图片生成模型（供 ark_generate_images 使用）
+  # 也可用环境变量覆盖：ARK_IMAGE_API_KEY / ARK_IMAGE_MODEL / ARK_IMAGE_MODEL_TYPE
+  image:
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    api_key: "ark-image-api-key"
+    model: "doubao-seedream-4-0-250828"
+    timeout: 600
+
+  # 独立联网搜索 API（供 volc_web_search 使用，不走 ARK 内置 web_search）
+  # 也可用环境变量覆盖：VOLC_SEARCH_API_KEY / SEARCH_API_KEY / VOLC_SEARCH_API_URL
+  search:
+    base_url: "https://open.feedcoopapi.com/search_api/web_search"
+    api_key: "search-api-key"
+    model: "volc-search"
+    timeout: 30
+
+  # 微信公众号草稿 API（供 wechat_create_draft 使用）
+  # 也可用环境变量覆盖：WECHAT_MP_ACCESS_TOKEN 或 WECHAT_MP_APP_ID / WECHAT_MP_APP_SECRET
+  # 说明：这里复用 model 字段保存 app_id，api_key 字段保存 app_secret。
+  wechat_official_account:
+    base_url: "https://api.weixin.qq.com"
+    api_key: "wechat-app-secret"
+    model: "wechat-app-id"
+    timeout: 60
