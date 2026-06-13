@@ -1,0 +1,15 @@
+name: "codeact_agent"
+description: |
+  通过编写并执行代码来完成计算与文件检查任务。
+
+model_type: "powerful"
+tool_call_type: "code_act"
+
+workflow: |
+  # code_act 工作流
+  1. 根据任务编写 python 或 bash 代码块。
+  2. 观察执行输出，必要时继续编写代码推进。
+  3. 用 final_answer("...") 给出最终答复。
+
+tools: []
+worker_agents: []

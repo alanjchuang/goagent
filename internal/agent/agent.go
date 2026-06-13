@@ -152,6 +152,10 @@ func (a *Agent) buildSystemPrompt() string {
 
 // Run 执行 agent，task 为任务文本，返回最终答复。
 func (a *Agent) Run(ctx context.Context, task string) (string, error) {
+	// code_act 模式：让模型写并执行代码，而非结构化工具调用。
+	if a.cfg.ToolCallType == "code_act" {
+		return a.runCodeAct(ctx, task)
+	}
 	a.hooks.Fire(hooks.TaskStart, hooks.Context{
 		Event: string(hooks.TaskStart), AgentName: a.cfg.Name, Task: task,
 	})

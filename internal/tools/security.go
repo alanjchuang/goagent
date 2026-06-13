@@ -52,6 +52,11 @@ var injectionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\bLD_PRELOAD=`),
 }
 
+// CheckCommandWithActive 用当前全局策略校验命令（供 code_act 等复用）。
+func CheckCommandWithActive(command string) error {
+	return activePolicy.CheckCommand(command)
+}
+
 // CheckCommand 校验一条 shell 命令是否被策略允许。
 func (p SecurityPolicy) CheckCommand(command string) error {
 	if p.BlockDestructive {
