@@ -152,6 +152,7 @@ func RegisterBuiltins(r *Registry, names []string) {
 		"shell_tool":       ShellTool{},
 		"grep_search":      GrepSearch{},
 		"glob_search":      GlobSearch{},
+		"edit_file":        EditFile{},
 	}
 	for _, n := range names {
 		if t, ok := all[n]; ok {
