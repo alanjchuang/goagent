@@ -8,5 +8,8 @@
 # 运行日志
 .logs/
 
+# 工作流运行产物
+outputs/
+
 # 含密钥的本地配置（仅提交 llm.example.yaml）
 config/llm.yaml

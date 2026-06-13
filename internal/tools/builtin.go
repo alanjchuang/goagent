@@ -153,19 +153,21 @@ func (GetFileOutline) Execute(args map[string]any) (string, error) {
 // names 为 agent YAML 声明的工具名列表；未知名称会被忽略。
 func RegisterBuiltins(r *Registry, names []string) {
 	all := map[string]Tool{
-		"read_file":                ReadFile{},
-		"write_file":               WriteFile{},
-		"browse_directory":         BrowseDirectory{},
-		"get_file_outline":         GetFileOutline{},
-		"shell_tool":               ShellTool{},
-		"grep_search":              GrepSearch{},
-		"glob_search":              GlobSearch{},
-		"edit_file":                EditFile{},
-		"web_search":               WebSearch{},
-		"repo_map":                 RepoMap{},
-		"lsp_find_definition":      LSPDefinition{},
-		"lsp_find_references":      LSPReferences{},
-		"lsp_get_document_symbols": LSPDocumentSymbols{},
+		"read_file":                      ReadFile{},
+		"write_file":                     WriteFile{},
+		"browse_directory":               BrowseDirectory{},
+		"get_file_outline":               GetFileOutline{},
+		"shell_tool":                     ShellTool{},
+		"grep_search":                    GrepSearch{},
+		"glob_search":                    GlobSearch{},
+		"edit_file":                      EditFile{},
+		"web_search":                     WebSearch{},
+		"ark_generate_images":            ArkGenerateImages{},
+		"licensed_image_search_strategy": LicensedImageSearchStrategy{},
+		"repo_map":                       RepoMap{},
+		"lsp_find_definition":            LSPDefinition{},
+		"lsp_find_references":            LSPReferences{},
+		"lsp_get_document_symbols":       LSPDocumentSymbols{},
 	}
 	for _, n := range names {
 		if t, ok := all[n]; ok {
