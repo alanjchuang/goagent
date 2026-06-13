@@ -10,7 +10,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -23,8 +25,8 @@ import (
 	"github.com/alanjchuang/goagent/internal/tools"
 )
 
-// codeBlockRe 匹配 ```python / ```bash / ```sh 代码块。
-var codeActBlockRe = regexp.MustCompile("(?s)```(python|py|bash|sh)\\s*\\n(.*?)```")
+// codeActBlockRe 匹配 ```python / ```go / ```bash 等代码块。
+var codeActBlockRe = regexp.MustCompile("(?s)```(python|py|go|golang|bash|sh)\\s*\\n(.*?)```")
 
 // finalAnswerCallRe 匹配 final_answer("...") 或 final_answer('...') 调用。
 var finalAnswerCallRe = regexp.MustCompile(`(?s)final_answer\s*\(\s*["'](.+?)["']\s*\)`)
@@ -39,7 +41,8 @@ func (a *Agent) buildCodeActPrompt() string {
 	sb.WriteString(a.cfg.Workflow)
 	sb.WriteString("\n\n## 执行方式（重要）\n")
 	sb.WriteString("- 你通过编写并执行代码来完成任务，而不是调用结构化工具。\n")
-	sb.WriteString("- 每一步输出一个代码块（```python 或 ```bash），系统会执行它并把输出返回给你。\n")
+	sb.WriteString("- 每一步输出一个代码块（```python、```go 或 ```bash），系统会执行它并把输出返回给你。\n")
+	sb.WriteString("- go 代码块需是可独立运行的完整程序（含 package main 与 func main）。\n")
 	sb.WriteString("- 根据执行结果决定下一步，逐步推进。\n")
 	sb.WriteString("- 完成任务时，输出 `final_answer(\"你的最终答复\")` 来结束（写在代码块外或代码块内均可）。\n")
 	sb.WriteString("- 每次只输出一个代码块。\n")
@@ -118,12 +121,24 @@ func (a *Agent) runCodeAct(ctx context.Context, task string) (string, error) {
 	return "", fmt.Errorf("达到最大步数 %d 仍未完成任务", maxSteps)
 }
 
-// execCode 执行一段代码（python 或 bash），带安全检查与超时，返回合并输出。
+// execCode 执行一段代码（python / go / bash），带安全检查与超时，返回合并输出。
 func (a *Agent) execCode(lang, code string) string {
 	var cmd *exec.Cmd
 	switch lang {
 	case "python", "py":
 		cmd = exec.Command("python3", "-c", code)
+	case "go", "golang":
+		// 把代码写入临时目录的 main.go，用 go run 执行。
+		tmpDir, err := os.MkdirTemp("", "goagent_codeact_*")
+		if err != nil {
+			return "创建临时目录失败: " + err.Error()
+		}
+		defer os.RemoveAll(tmpDir)
+		mainGo := filepath.Join(tmpDir, "main.go")
+		if err := os.WriteFile(mainGo, []byte(code), 0o644); err != nil {
+			return "写入临时 go 文件失败: " + err.Error()
+		}
+		cmd = exec.Command("go", "run", mainGo)
 	default: // bash / sh
 		// 复用 shell 安全策略对 bash 代码做基础校验。
 		if err := tools.CheckCommandWithActive(code); err != nil {
