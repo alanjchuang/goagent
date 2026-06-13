@@ -44,6 +44,15 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// Names 返回所有已注册工具名的集合（用于文本解析校验工具名）。
+func (r *Registry) Names() map[string]bool {
+	names := make(map[string]bool, len(r.tools))
+	for n := range r.tools {
+		names[n] = true
+	}
+	return names
+}
+
 // Schemas 返回所有已注册工具的 LLM schema。
 func (r *Registry) Schemas() []llm.ToolSchema {
 	schemas := make([]llm.ToolSchema, 0, len(r.tools))

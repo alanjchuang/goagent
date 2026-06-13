@@ -12,6 +12,7 @@ import (
 
 	"github.com/alanjchuang/goagent/internal/config"
 	"github.com/alanjchuang/goagent/internal/llm"
+	"github.com/alanjchuang/goagent/internal/toolparse"
 	"github.com/alanjchuang/goagent/internal/tools"
 )
 
@@ -82,8 +83,28 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 		}
 		messages = append(messages, *resp)
 
-		// 无工具调用：把文本内容当作最终答复返回。
+		// 无原生 tool_calls：先尝试从文本内容中解析工具调用（兼容不支持原生
+		// tool_call 的模型），解析不到再把文本当作最终答复。
 		if len(resp.ToolCalls) == 0 {
+			if call, ok := toolparse.Parse(resp.Content, a.knownTools()); ok {
+				fmt.Printf("[text-parsed tool_call:%s] %s(%s)\n", call.Strategy, call.Name, call.Arguments)
+				if call.Name == "final_answer" {
+					ans := extractFinalAnswer(call.Arguments)
+					fmt.Printf("[final_answer] %s\n", ans)
+					return ans, nil
+				}
+				result, err := a.registry.Execute(call.Name, call.Arguments)
+				if err != nil {
+					result = "工具执行错误: " + err.Error()
+				}
+				printToolResult(result)
+				// 文本解析出的工具调用没有 tool_call_id，回填为 user 消息。
+				messages = append(messages, llm.Message{
+					Role:    llm.RoleUser,
+					Content: fmt.Sprintf("工具 %s 的执行结果:\n%s", call.Name, result),
+				})
+				continue
+			}
 			if strings.TrimSpace(resp.Content) != "" {
 				fmt.Printf("[assistant] %s\n", resp.Content)
 				return resp.Content, nil
@@ -110,11 +131,7 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 			if err != nil {
 				result = "工具执行错误: " + err.Error()
 			}
-			preview := result
-			if len(preview) > 500 {
-				preview = preview[:500] + "...(截断)"
-			}
-			fmt.Printf("[tool_result] %s\n", preview)
+			printToolResult(result)
 
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
@@ -129,3 +146,15 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 
 // Usage 返回累计 token 用量。
 func (a *Agent) Usage() llm.TokenUsage { return a.client.CumulativeUsage }
+
+// knownTools 返回已注册工具名集合，供文本解析校验。
+func (a *Agent) knownTools() map[string]bool { return a.registry.Names() }
+
+// printToolResult 打印工具执行结果（超长时截断）。
+func printToolResult(result string) {
+	preview := result
+	if len(preview) > 500 {
+		preview = preview[:500] + "...(截断)"
+	}
+	fmt.Printf("[tool_result] %s\n", preview)
+}
