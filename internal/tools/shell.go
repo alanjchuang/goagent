@@ -9,7 +9,6 @@ package tools
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -48,7 +47,7 @@ func (ShellTool) Execute(args map[string]any) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd := newShellCmd(command)
 	if cwd := strArg(args, "cwd"); cwd != "" {
 		cmd.Dir = cwd
 	}

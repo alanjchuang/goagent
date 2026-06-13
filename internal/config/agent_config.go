@@ -26,16 +26,24 @@ type SkillRef struct {
 	Platform string `yaml:"platform"`
 }
 
+// ExecutionEnv 描述 agent 的执行环境（local 或 docker 沙箱）。
+type ExecutionEnv struct {
+	Type    string `yaml:"type"`  // "local" | "docker"
+	Image   string `yaml:"image"` // docker 镜像（type=docker 时）
+	WorkDir string `yaml:"workdir"`
+}
+
 // AgentConfig 描述一个 supervisor/worker agent 的 YAML 配置。
 type AgentConfig struct {
-	Name         string      `yaml:"name"`
-	Description  string      `yaml:"description"`
-	ModelType    string      `yaml:"model_type"`
-	ToolCallType string      `yaml:"tool_call_type"` // "tool_call" | "code_act"
-	Workflow     string      `yaml:"workflow"`
-	Tools        []ToolRef   `yaml:"tools"`
-	WorkerAgents []WorkerRef `yaml:"worker_agents"`
-	Skills       []SkillRef  `yaml:"skills"`
+	Name         string       `yaml:"name"`
+	Description  string       `yaml:"description"`
+	ModelType    string       `yaml:"model_type"`
+	ToolCallType string       `yaml:"tool_call_type"` // "tool_call" | "code_act"
+	Workflow     string       `yaml:"workflow"`
+	Tools        []ToolRef    `yaml:"tools"`
+	WorkerAgents []WorkerRef  `yaml:"worker_agents"`
+	Skills       []SkillRef   `yaml:"skills"`
+	ExecutionEnv ExecutionEnv `yaml:"execution_env"`
 
 	// SourcePath 记录该配置来自哪个文件，便于解析相对路径。
 	SourcePath string `yaml:"-"`

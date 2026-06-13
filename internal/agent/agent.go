@@ -67,6 +67,20 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 	}
 	reg := tools.NewRegistry()
 
+	// 根据 execution_env 配置 docker 沙箱。
+	if cfg.ExecutionEnv.Type == "docker" {
+		workdir := cfg.ExecutionEnv.WorkDir
+		if workdir == "" && config.C != nil {
+			workdir = config.C.AgentRoot
+		}
+		tools.SetSandbox(tools.SandboxConfig{
+			Enabled: true,
+			Image:   cfg.ExecutionEnv.Image,
+			WorkDir: workdir,
+		})
+		logging.Get().Info("启用 docker 沙箱: 镜像=%s", cfg.ExecutionEnv.Image)
+	}
+
 	// 收集 agent YAML 声明的工具名。
 	names := make([]string, 0, len(cfg.Tools))
 	for _, t := range cfg.Tools {
