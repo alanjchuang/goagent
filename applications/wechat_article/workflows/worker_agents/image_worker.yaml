@@ -13,14 +13,24 @@ workflow: |
 
   ## 图片策略
   1. 默认优先 AI 生图：先生成高质量中文 prompt，再调用 ark_generate_images 生成图片 URL，并使用默认 download_images=true 把图片保存到 outputs/images/generated。
+     - 生图模型由工具默认值、环境变量或私有配置决定；工作流 YAML 不写具体 endpoint，不要在调用时覆盖 model，除非用户临时明确指定。
+     - 调用时优先设置 `stream=false`、`sequential_image_generation=disabled`、`size=2K`、`watermark=false`。
   2. 封面图建议 max_images=1；如果要生成同风格系列插图，可设置 max_images=2-4，并保持统一主题、色彩和视觉风格。
   3. 如果需要网上找图，调用 licensed_image_search_strategy 生成授权图库搜索策略；如需候选图片文件，设置 run_image_search=true，让 volc_web_search 使用 search_type=image 并下载到 outputs/images/search。只能建议使用 Unsplash、Pexels、Pixabay、Wikimedia Commons、官方媒体包等授权来源。
   4. 不得建议直接盗用公众号、小红书、知乎、新闻站或个人博客图片。
   5. 每张网络图都必须记录：来源 URL、作者、授权类型、下载时间、使用位置。
 
+  ## 生图质量要求
+  - 图片必须适合公众号直接使用，优先电影级、高质感、真实光影、细腻色彩层次、构图明确、主体突出。
+  - 为避免模型生成模板字样，实际传给 ark_generate_images 的 prompt 不要写“公众号封面图”“封面图”“头图”“海报”“标题”“副标题”“后期加标题”等容易触发文字模板的词；改写为“无文字科技主题视觉插画/文章视觉背景/横向视觉主图”。
+  - 避免让模型生成可读文字载体：不要要求画面出现代码编辑器截图、网页 UI、终端窗口、屏幕文字、看板文字、文档文字、海报文字；可以改用抽象代码光流、几何节点、无字界面光块、人物背影和科技空间来表达主题。
+  - prompt 中可以描述“公众号封面比例/正文插图比例/横版构图/方形构图”，但必须明确：**画面内不要出现任何文字、数字、比例标识、16:9/1:1/2.35:1 字样、UI 水印、Logo、水印、边框标尺、尺寸标注**。
+  - 封面图需要保留标题留白，但留白区域不能出现示例标题、假文字、乱码字符。
+  - 生成后输出时必须提醒人工检查：是否有文字残影、比例标识、水印、畸形 UI 或错误 Logo。
+
   ## 输出内容
   - 封面图方案：比例、风格、元素、留白、标题排版建议
-  - 封面图 AI prompt：中文和英文
+  - 封面图 AI prompt：中文和英文；prompt 中必须包含“画面内无文字、无比例标识、无 16:9/1:1/2.35:1 字样、无水印、无 Logo”
   - ark_generate_images 调用结果：图片 URL、本地文件路径 local_path、尺寸、模型、prompt、用量或错误信息
   - 正文配图清单：位置、用途、画面描述、AI prompt、生成 URL/local_path 或图库关键词/候选本地文件
   - 金句图方案

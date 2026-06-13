@@ -66,6 +66,16 @@ func TestSanitizeWeChatHTMLContent(t *testing.T) {
 			in:   "```html\n<![CDATA[\n<section><p>hello</p></section>\n]]>\n```",
 			want: `<section><p>hello</p></section>`,
 		},
+		{
+			name: "normalize unordered list",
+			in:   `<section><ul><li>第一项</li><li>第二项</li></ul></section>`,
+			want: `<section><p style="margin:0 0 8px;padding-left:1em;text-indent:-1em;">• 第一项</p><p style="margin:0 0 8px;padding-left:1em;text-indent:-1em;">• 第二项</p></section>`,
+		},
+		{
+			name: "normalize ordered list",
+			in:   `<section><ol><li>根据验收标准反推测试场景</li><li>从四个角度 Review 代码</li></ol></section>`,
+			want: `<section><p style="margin:0 0 8px;padding-left:1em;text-indent:-1em;">• 根据验收标准反推测试场景</p><p style="margin:0 0 8px;padding-left:1em;text-indent:-1em;">• 从四个角度 Review 代码</p></section>`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -18,6 +18,7 @@ workflow: |
      - 小标题清晰
      - 引用块突出
      - 列表适合移动端阅读
+     - 不要使用原生 `<ol>`、`<ul>`、`<li>` 标签；微信公众号草稿箱可能把列表序号重排或渲染成连续的 1、2、3、4、5。请用 `<p>` / `<section>` 手写项目符号，例如「①」「②」「•」，并用内联样式控制缩进。
      - 图片使用占位符，例如 {{cover_image}}、{{image_1}}
   3. 生成草稿字段：title、author、digest、content、content_source_url、thumb_media_id_placeholder、need_open_comment。
   4. 插入 CTA 时保持自然、克制、合规；默认以前期引流为主（关注、回复关键词、加企微/入群、预约咨询、查看合集），资料包领取仅作为可选 CTA，不要默认强行加入。

@@ -284,8 +284,20 @@ func sanitizeWeChatHTMLContent(content string) string {
 	if cdataStartRe.MatchString(content) {
 		content = cdataStartRe.ReplaceAllString(content, "")
 		content = regexp.MustCompile(`(?is)\s*\]\]>\s*$`).ReplaceAllString(content, "")
-		return strings.TrimSpace(content)
+		return normalizeWeChatHTMLLists(strings.TrimSpace(content))
 	}
+	return normalizeWeChatHTMLLists(content)
+}
+
+func normalizeWeChatHTMLLists(content string) string {
+	// 微信草稿箱对原生 ol/ul/li 的渲染不稳定，可能把多个列表合并成连续编号。
+	// 发布前统一转成手写项目符号段落，避免「两件事」在草稿中变成 1、2、3、4、5。
+	listTagRe := regexp.MustCompile(`(?is)</?\s*(?:ol|ul)\b[^>]*>`)
+	content = listTagRe.ReplaceAllString(content, "")
+	liOpenRe := regexp.MustCompile(`(?is)<\s*li\b[^>]*>`)
+	content = liOpenRe.ReplaceAllString(content, `<p style="margin:0 0 8px;padding-left:1em;text-indent:-1em;">• `)
+	liCloseRe := regexp.MustCompile(`(?is)</\s*li\s*>`)
+	content = liCloseRe.ReplaceAllString(content, `</p>`)
 	return content
 }
 

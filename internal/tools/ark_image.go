@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -20,8 +21,8 @@ import (
 	"github.com/volcengine/volcengine-go-sdk/volcengine"
 )
 
-const defaultArkImageModel = "doubao-seedream-4-0-250828"
 const defaultArkImageModelType = "image"
+const defaultArkImageAPIBase = "https://ark.cn-beijing.volces.com/api/v3"
 
 // ArkGenerateImages 调用火山方舟文生图接口，返回图片 URL，并默认下载到 outputs/。
 type ArkGenerateImages struct{}
@@ -40,7 +41,7 @@ func (ArkGenerateImages) Parameters() map[string]any {
 			},
 			"model": map[string]any{
 				"type":        "string",
-				"description": "火山方舟生图模型，默认读取 ARK_IMAGE_MODEL，未设置则使用 doubao-seedream-4-0-250828。",
+				"description": "火山方舟生图模型；优先使用入参，其次读取 ARK_IMAGE_MODEL 或 config/llm.yaml 的 model.image.model。",
 			},
 			"size": map[string]any{
 				"type":        "string",
@@ -52,11 +53,15 @@ func (ArkGenerateImages) Parameters() map[string]any {
 			},
 			"watermark": map[string]any{
 				"type":        "boolean",
-				"description": "是否添加水印，默认 true。",
+				"description": "是否添加水印，默认 false；公众号封面/正文配图建议保持 false，避免画面内出现水印。",
 			},
 			"sequential_image_generation": map[string]any{
 				"type":        "string",
-				"description": "连续生图模式：auto 或 disabled，默认 auto。",
+				"description": "连续生图模式：auto 或 disabled；非流式默认 disabled，流式默认 auto。",
+			},
+			"stream": map[string]any{
+				"type":        "boolean",
+				"description": "是否使用流式生图接口，默认 false，走 /images/generations 非流式接口。",
 			},
 			"download_images": map[string]any{
 				"type":        "boolean",
@@ -89,7 +94,10 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 
 	imageModel := strings.TrimSpace(strArg(args, "model"))
 	if imageModel == "" {
-		imageModel = firstNonEmpty(os.Getenv("ARK_IMAGE_MODEL"), configValue(hasImageConfig, mc.Model), defaultArkImageModel)
+		imageModel = firstNonEmpty(os.Getenv("ARK_IMAGE_MODEL"), configValue(hasImageConfig, mc.Model))
+	}
+	if imageModel == "" {
+		return "", fmt.Errorf("缺少火山方舟图片模型：请在 config/llm.yaml 的 model.image.model 中配置，或设置 ARK_IMAGE_MODEL，或通过 model 参数传入")
 	}
 
 	size := strings.TrimSpace(strArg(args, "size"))
@@ -103,18 +111,37 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 	if maxImages > 4 {
 		maxImages = 4
 	}
-	watermark := boolArgDefault(args, "watermark", true)
+	watermark := boolArgDefault(args, "watermark", false)
+	streamMode := boolArgDefault(args, "stream", false)
 	sequential := strings.TrimSpace(strArg(args, "sequential_image_generation"))
 	if sequential == "" {
-		sequential = model.SequentialImageGenerationAuto
+		if streamMode {
+			sequential = model.SequentialImageGenerationAuto
+		} else {
+			sequential = string(model.SequentialImageGenerationDisabled)
+		}
 	}
-	seq := model.SequentialImageGeneration(sequential)
 	downloadImages := boolArgDefault(args, "download_images", true)
 	outputDir := strings.TrimSpace(strArg(args, "output_dir"))
 	if outputDir == "" {
 		outputDir = "outputs/images/generated"
 	}
 
+	if !streamMode {
+		apiBase := firstNonEmpty(os.Getenv("ARK_IMAGE_BASE_URL"), configValue(hasImageConfig, mc.BaseURL), defaultArkImageAPIBase)
+		return generateImagesNonStreaming(context.Background(), apiBase, apiKey, arkImageGenerationOptions{
+			Model:          imageModel,
+			Prompt:         prompt,
+			Size:           size,
+			MaxImages:      maxImages,
+			Watermark:      watermark,
+			Sequential:     sequential,
+			DownloadImages: downloadImages,
+			OutputDir:      outputDir,
+		})
+	}
+
+	seq := model.SequentialImageGeneration(sequential)
 	client := arkruntime.NewClientWithApiKey(apiKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -206,6 +233,138 @@ func (ArkGenerateImages) Execute(args map[string]any) (string, error) {
 		}
 	}
 
+	result.Generated = len(result.Images)
+	out, _ := json.MarshalIndent(result, "", "  ")
+	return string(out), nil
+}
+
+type arkImageGenerationOptions struct {
+	Model          string
+	Prompt         string
+	Size           string
+	MaxImages      int
+	Watermark      bool
+	Sequential     string
+	DownloadImages bool
+	OutputDir      string
+}
+
+type arkImageResult struct {
+	Index       int    `json:"index"`
+	Size        string `json:"size,omitempty"`
+	URL         string `json:"url"`
+	LocalPath   string `json:"local_path,omitempty"`
+	DownloadErr string `json:"download_error,omitempty"`
+}
+
+func generateImagesNonStreaming(parent context.Context, apiBase, apiKey string, opts arkImageGenerationOptions) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
+	defer cancel()
+
+	type request struct {
+		Model                     string `json:"model"`
+		Prompt                    string `json:"prompt"`
+		SequentialImageGeneration string `json:"sequential_image_generation,omitempty"`
+		ResponseFormat            string `json:"response_format"`
+		Size                      string `json:"size"`
+		Stream                    bool   `json:"stream"`
+		Watermark                 bool   `json:"watermark"`
+		N                         int    `json:"n,omitempty"`
+	}
+	reqBody := request{
+		Model:                     opts.Model,
+		Prompt:                    opts.Prompt,
+		SequentialImageGeneration: opts.Sequential,
+		ResponseFormat:            "url",
+		Size:                      opts.Size,
+		Stream:                    false,
+		Watermark:                 opts.Watermark,
+	}
+	if opts.MaxImages > 1 && strings.EqualFold(opts.Sequential, string(model.SequentialImageGenerationDisabled)) {
+		reqBody.N = opts.MaxImages
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+	endpoint := strings.TrimRight(apiBase, "/") + "/images/generations"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("调用 images/generations 失败: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取 images/generations 响应失败: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("images/generations status=%d, body=%s", resp.StatusCode, string(respBody))
+	}
+
+	type responseImage struct {
+		URL string `json:"url"`
+	}
+	type responseError struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	type response struct {
+		Created int64           `json:"created,omitempty"`
+		Data    []responseImage `json:"data"`
+		Usage   any             `json:"usage,omitempty"`
+		Error   *responseError  `json:"error,omitempty"`
+	}
+	var parsed response
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return "", fmt.Errorf("解析 images/generations 响应失败: %w; body=%s", err, string(respBody))
+	}
+
+	result := struct {
+		Model      string            `json:"model"`
+		Prompt     string            `json:"prompt"`
+		Size       string            `json:"size"`
+		Stream     bool              `json:"stream"`
+		Images     []arkImageResult  `json:"images"`
+		Error      *responseError    `json:"error,omitempty"`
+		Usage      any               `json:"usage,omitempty"`
+		Generated  int               `json:"generated"`
+		Created    int64             `json:"created,omitempty"`
+		Note       string            `json:"note"`
+		RawWarning map[string]string `json:"raw_warning,omitempty"`
+	}{
+		Model:   opts.Model,
+		Prompt:  opts.Prompt,
+		Size:    opts.Size,
+		Stream:  false,
+		Created: parsed.Created,
+		Usage:   parsed.Usage,
+		Error:   parsed.Error,
+		Note:    "已使用非流式 /images/generations 生成图片；用于公众号前请人工复核图片中是否存在文字、比例标识、水印和版权风险。",
+	}
+
+	for i, data := range parsed.Data {
+		if strings.TrimSpace(data.URL) == "" {
+			continue
+		}
+		img := arkImageResult{Index: i, Size: opts.Size, URL: data.URL}
+		if opts.DownloadImages {
+			localPath, err := downloadImageToOutput(ctx, img.URL, opts.OutputDir, fmt.Sprintf("generated_%02d", i+1))
+			if err != nil {
+				img.DownloadErr = err.Error()
+			} else {
+				img.LocalPath = localPath
+			}
+		}
+		result.Images = append(result.Images, img)
+	}
 	result.Generated = len(result.Images)
 	out, _ := json.MarshalIndent(result, "", "  ")
 	return string(out), nil

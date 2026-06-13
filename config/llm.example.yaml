@@ -30,10 +30,11 @@ model:
 
   # 图片生成模型（供 ark_generate_images 使用）
   # 也可用环境变量覆盖：ARK_IMAGE_API_KEY / ARK_IMAGE_MODEL / ARK_IMAGE_MODEL_TYPE
+  # 图片 endpoint/model 请在配置中填写。
   image:
     base_url: "https://ark.cn-beijing.volces.com/api/v3"
     api_key: "ark-image-api-key"
-    model: "doubao-seedream-4-0-250828"
+    model: "ark-image-endpoint-id"
     timeout: 600
 
   # 独立联网搜索 API（供 volc_web_search 使用，不走 ARK 内置 web_search）
