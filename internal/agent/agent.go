@@ -7,6 +7,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -64,6 +65,19 @@ func (a *Agent) buildSystemPrompt() string {
 	sb.WriteString("- 你可以调用提供的工具来完成任务。\n")
 	sb.WriteString("- 部分工具可能是子 Agent（worker），可把子任务委派给它们处理。\n")
 	sb.WriteString("- 完成任务后，必须调用 final_answer 工具给出最终答复。\n")
+
+	// 列出可用工具，并说明文本调用格式。这对不支持原生 tool_call 的模型很关键：
+	// 它们看不到 tools 字段，只能靠系统提示词知道有哪些工具、如何调用。
+	sb.WriteString("\n## 可用工具\n")
+	for _, s := range a.registry.Schemas() {
+		params, _ := json.Marshal(s.Function.Parameters)
+		sb.WriteString(fmt.Sprintf("- %s: %s\n  参数 schema: %s\n",
+			s.Function.Name, s.Function.Description, string(params)))
+	}
+	sb.WriteString("\n## 文本调用格式（当你无法使用原生工具调用时）\n")
+	sb.WriteString("用如下 JSON（可放在 ```json 代码块中）发起一次工具调用:\n")
+	sb.WriteString("{\"name\": \"工具名\", \"arguments\": {\"参数名\": \"参数值\"}}\n")
+	sb.WriteString("每次只调用一个工具。\n")
 	return sb.String()
 }
 
@@ -77,10 +91,17 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 
 	for step := 1; step <= maxSteps; step++ {
 		fmt.Printf("\n──────── Step %d ────────\n", step)
-		resp, err := a.client.Complete(ctx, messages, schemas)
+		// 三态检测：决定本次是否携带 tool schema（原生 tool_call）还是靠文本解析。
+		var sentSchemas []llm.ToolSchema
+		if a.client.UseNativeToolCalls() {
+			sentSchemas = schemas
+		}
+		resp, err := a.client.Complete(ctx, messages, sentSchemas)
 		if err != nil {
 			return "", err
 		}
+		// auto 模式：根据响应是否含原生 tool_calls 更新检测状态。
+		a.client.UpdateNativeDetection(resp)
 		messages = append(messages, *resp)
 
 		// 无原生 tool_calls：先尝试从文本内容中解析工具调用（兼容不支持原生

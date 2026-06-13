@@ -76,6 +76,8 @@ type Client struct {
 	httpClient *http.Client
 	// CumulativeUsage 累计 token 用量（对应 Python 版 monitor_metrics）。
 	CumulativeUsage TokenUsage
+	// nativeDetect 是 auto 模式下原生 tool_call 的探测状态。
+	nativeDetect nativeState
 }
 
 // NewClient 基于全局配置构造一个针对 modelType 的客户端。
