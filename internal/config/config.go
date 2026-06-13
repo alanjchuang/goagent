@@ -68,6 +68,7 @@ type SystemConfig struct {
 		Dir     string `yaml:"dir"`
 	} `yaml:"logging"`
 	DefaultLoadedTools []string `yaml:"default_loaded_tools"`
+	MCPServers         string   `yaml:"mcp_servers"` // .mcp.json 路径（相对 agent_root）
 }
 
 // Config 是全局配置容器。

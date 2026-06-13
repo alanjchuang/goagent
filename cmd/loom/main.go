@@ -185,6 +185,7 @@ func runCmd(args []string) {
 		fmt.Fprintf(os.Stderr, "创建 agent 失败: %v\n", err)
 		os.Exit(1)
 	}
+	defer ag.Close()
 
 	// 4.1 启用 checkpoint：新建或从 --resume 恢复。
 	ckptMgr := checkpoint.NewManager(ac.Name, logDir)

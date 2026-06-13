@@ -17,6 +17,7 @@ import (
 	"github.com/alanjchuang/goagent/internal/hooks"
 	"github.com/alanjchuang/goagent/internal/llm"
 	"github.com/alanjchuang/goagent/internal/logging"
+	"github.com/alanjchuang/goagent/internal/mcp"
 	"github.com/alanjchuang/goagent/internal/memory"
 	"github.com/alanjchuang/goagent/internal/skills"
 	"github.com/alanjchuang/goagent/internal/toolparse"
@@ -38,6 +39,13 @@ type Agent struct {
 	ckpt        *checkpoint.Manager
 	ckptState   *checkpoint.State
 	resumeMsgs  []llm.Message // 恢复时预填的历史消息
+
+	mcpClients []*mcp.Client // 已连接的 MCP server，需在结束时关闭
+}
+
+// Close 释放 agent 持有的资源（如 MCP 连接）。
+func (a *Agent) Close() {
+	closeMCPClients(a.mcpClients)
 }
 
 // EnableCheckpoint 开启 checkpoint：每步持久化状态到 mgr，使用给定 state。
@@ -98,10 +106,13 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 		}
 	}
 
+	// 连接 MCP server 并注册其工具（若配置了 mcp_servers）。
+	mcpClients := registerMCPTools(reg)
+
 	// 始终注册 final_answer，供模型结束任务。
 	reg.Register(&finalAnswerTool{})
 
-	return &Agent{cfg: cfg, client: client, registry: reg, skills: skReg, hooks: hookMgr}, nil
+	return &Agent{cfg: cfg, client: client, registry: reg, skills: skReg, hooks: hookMgr, mcpClients: mcpClients}, nil
 }
 
 // buildSystemPrompt 构造系统提示词（对应 Python 版 prompt_builder）。
