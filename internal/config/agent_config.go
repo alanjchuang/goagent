@@ -20,6 +20,12 @@ type WorkerRef struct {
 	Path string `yaml:"path"`
 }
 
+// SkillRef 是 agent YAML 中 skills 列表的一项。
+type SkillRef struct {
+	Path     string `yaml:"path"`
+	Platform string `yaml:"platform"`
+}
+
 // AgentConfig 描述一个 supervisor/worker agent 的 YAML 配置。
 type AgentConfig struct {
 	Name         string      `yaml:"name"`
@@ -29,6 +35,7 @@ type AgentConfig struct {
 	Workflow     string      `yaml:"workflow"`
 	Tools        []ToolRef   `yaml:"tools"`
 	WorkerAgents []WorkerRef `yaml:"worker_agents"`
+	Skills       []SkillRef  `yaml:"skills"`
 
 	// SourcePath 记录该配置来自哪个文件，便于解析相对路径。
 	SourcePath string `yaml:"-"`

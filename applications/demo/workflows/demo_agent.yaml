@@ -23,3 +23,7 @@ tools:
   - name: "write_file"
 
 worker_agents: []
+
+skills:
+  - path: "applications/demo/skills"
+    platform: "Claude"

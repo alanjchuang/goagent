@@ -9,11 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/alanjchuang/goagent/internal/config"
 	"github.com/alanjchuang/goagent/internal/llm"
 	"github.com/alanjchuang/goagent/internal/logging"
+	"github.com/alanjchuang/goagent/internal/skills"
 	"github.com/alanjchuang/goagent/internal/toolparse"
 	"github.com/alanjchuang/goagent/internal/tools"
 )
@@ -26,6 +28,7 @@ type Agent struct {
 	cfg      *config.AgentConfig
 	client   *llm.Client
 	registry *tools.Registry
+	skills   *skills.Registry
 }
 
 // New 根据 agent 配置构建 Agent，加载其工具与 LLM 客户端。
@@ -48,10 +51,30 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 		return nil, err
 	}
 
+	// 加载 skills（来自 agent YAML 声明的 skills 目录）。
+	skReg := skills.NewRegistry()
+	for _, s := range cfg.Skills {
+		if s.Path == "" {
+			continue
+		}
+		dir := s.Path
+		if !filepath.IsAbs(dir) && config.C != nil {
+			dir = filepath.Join(config.C.AgentRoot, s.Path)
+		}
+		if err := skReg.LoadDir(dir); err != nil {
+			return nil, err
+		}
+	}
+	// 若存在可见 skill，则注册 load_skill / list_skills 工具。
+	if len(skReg.Listable()) > 0 {
+		reg.Register(&skills.ListSkillsTool{Reg: skReg})
+		reg.Register(&skills.LoadSkillTool{Reg: skReg})
+	}
+
 	// 始终注册 final_answer，供模型结束任务。
 	reg.Register(&finalAnswerTool{})
 
-	return &Agent{cfg: cfg, client: client, registry: reg}, nil
+	return &Agent{cfg: cfg, client: client, registry: reg, skills: skReg}, nil
 }
 
 // buildSystemPrompt 构造系统提示词（对应 Python 版 prompt_builder）。
@@ -79,6 +102,13 @@ func (a *Agent) buildSystemPrompt() string {
 	sb.WriteString("用如下 JSON（可放在 ```json 代码块中）发起一次工具调用:\n")
 	sb.WriteString("{\"name\": \"工具名\", \"arguments\": {\"参数名\": \"参数值\"}}\n")
 	sb.WriteString("每次只调用一个工具。\n")
+
+	// 强制注入模式的 skill：正文直接拼进系统提示词。
+	if a.skills != nil {
+		for _, s := range a.skills.ForceInjected() {
+			sb.WriteString(fmt.Sprintf("\n## Skill: %s\n%s\n", s.Name, s.Body))
+		}
+	}
 	return sb.String()
 }
 
