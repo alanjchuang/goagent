@@ -160,6 +160,7 @@ func RegisterBuiltins(r *Registry, names []string) {
 		"glob_search":      GlobSearch{},
 		"edit_file":        EditFile{},
 		"web_search":       WebSearch{},
+		"repo_map":         RepoMap{},
 	}
 	for _, n := range names {
 		if t, ok := all[n]; ok {
