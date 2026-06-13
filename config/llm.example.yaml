@@ -1,0 +1,29 @@
+# goagent LLM 配置示例（对应 AgentLoom config/llm.example.yaml）
+#
+# 使用方法：复制为 config/llm.yaml 并填入真实的 base_url / api_key / model。
+# base_url 需为 OpenAI 兼容的 Chat Completions 端点（结尾不含 /chat/completions）。
+# model 支持 litellm 风格前缀（如 openai/gpt-4o），程序会自动去掉前缀。
+
+model:
+  # 默认模型类型：agent yaml 未指定 model_type 时使用
+  default_model_type: powerful
+
+  # 强大模型（复杂推理 / 代码任务）
+  powerful:
+    base_url: "https://api.openai.com/v1"
+    api_key: "sk-xxxxxxxx"
+    model: "openai/gpt-4o"
+    temperature: 0.2
+    max_tokens: 8000
+    timeout: 300
+    num_retries: 3
+
+  # 快速模型（简单任务）
+  fast:
+    base_url: "https://api.openai.com/v1"
+    api_key: "sk-xxxxxxxx"
+    model: "openai/gpt-4o-mini"
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 120
+    num_retries: 3

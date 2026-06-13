@@ -1,0 +1,18 @@
+name: "file_reader_worker"
+description: |
+  专门负责读取并总结单个文件内容的子 Agent。
+  给定一个文件路径，读取它并用一段话概括其用途与关键内容。
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # 文件阅读工作流
+  1. 使用 read_file 读取给定文件。
+  2. 用 final_answer 返回该文件的简要总结（用途、关键结构）。
+
+tools:
+  - name: "read_file"
+  - name: "get_file_outline"
+
+worker_agents: []

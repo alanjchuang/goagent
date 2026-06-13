@@ -1,0 +1,16 @@
+# goagent 系统配置（对应 AgentLoom config/system.yaml 的精简版）
+system:
+  name: "goagent"
+  version: "0.1.0"
+
+logging:
+  enabled: true
+  level: "INFO"
+  dir: ".logs"
+
+# 默认加载的工具（agent yaml 未声明时的兜底）
+default_loaded_tools:
+  - "read_file"
+  - "write_file"
+  - "browse_directory"
+  - "get_file_outline"

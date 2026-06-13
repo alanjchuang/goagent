@@ -1,0 +1,26 @@
+name: "supervisor_agent"
+description: |
+  分析一个项目目录：先列出目录结构，再把关键文件交给子 Agent 阅读总结，
+  最后汇总成一份项目概览。
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # 项目概览工作流（Supervisor 调度 Worker）
+
+  ## 任务目标
+  生成目标目录的项目概览。
+
+  ## 执行步骤
+  1. 用 glob_search 或 browse_directory 了解目录结构。
+  2. 找到关键文件后，调用子 Agent file_reader_worker 逐个阅读并总结。
+  3. 汇总所有子 Agent 的总结，用 final_answer 输出项目概览。
+
+tools:
+  - name: "browse_directory"
+  - name: "glob_search"
+  - name: "grep_search"
+
+worker_agents:
+  - path: "applications/demo/workflows/worker_agents/file_reader_worker.yaml"

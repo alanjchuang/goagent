@@ -1,0 +1,25 @@
+name: "demo_agent"
+description: |
+  检查指定目录下的文件，并查看关键文件的内容，简要说明你发现了什么。
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # 目录检查工作流
+
+  ## 任务目标
+  按用户要求检查目录下的文件列表，并查看特定文件内容。
+
+  ## 执行步骤
+  1. 使用 browse_directory 列出目标目录下的所有文件和文件夹。
+  2. 若发现关键文件（如 README、配置文件、入口文件），用 read_file 读取其内容。
+  3. 用 final_answer 简要说明你的发现。
+
+tools:
+  - name: "browse_directory"
+  - name: "read_file"
+  - name: "get_file_outline"
+  - name: "write_file"
+
+worker_agents: []
