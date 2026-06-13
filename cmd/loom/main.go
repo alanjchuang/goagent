@@ -22,6 +22,7 @@ import (
 	"github.com/alanjchuang/goagent/internal/heartbeat"
 	"github.com/alanjchuang/goagent/internal/logging"
 	"github.com/alanjchuang/goagent/internal/scaffold"
+	"github.com/alanjchuang/goagent/internal/ui"
 )
 
 func main() {
@@ -39,6 +40,8 @@ func main() {
 		listTasksCmd()
 	case "clean-tasks":
 		cleanTasksCmd(os.Args[2:])
+	case "ui":
+		uiCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -66,6 +69,17 @@ func createCmd(args []string) {
 	fmt.Printf("已生成入口示例: %s\n运行: go run %s\n", out, out)
 }
 
+// uiCmd 实现 loom ui：启动 Web 可视化服务器。
+func uiCmd(args []string) {
+	fs := flag.NewFlagSet("ui", flag.ExitOnError)
+	port := fs.Int("port", 8080, "服务器端口")
+	_ = fs.Parse(args)
+	if err := ui.StartServer(*port); err != nil {
+		fmt.Fprintf(os.Stderr, "UI 服务器启动失败: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func usage() {
 	fmt.Print(`goagent (loom) - 轻量多 Agent 框架 (Go 版)
 
@@ -74,6 +88,7 @@ func usage() {
   loom create <workflow.yaml> [-o 输出路径]   生成 agent 的 Go 入口示例代码
   loom list-tasks                列出可恢复的 checkpoint 任务
   loom clean-tasks [--all]       清理 checkpoint（默认清理 7 天前的）
+  loom ui [--port 8080]          启动 Web 可视化面板
 
 示例:
   loom run applications/demo/workflows/demo_agent.yaml
@@ -162,6 +177,7 @@ func runCmd(args []string) {
 	taskOverride := fs.String("task", "", "覆盖 YAML 中的 description 作为任务文本")
 	logToFile := fs.Bool("log-to-file", false, "把日志归档到 .logs/<agent>/<时间戳>/run.log")
 	resumeID := fs.String("resume", "", "从指定 checkpoint task ID 恢复执行")
+	uiPort := fs.Int("ui", 0, "同时启动 Web 可视化面板的端口(0=不启动)")
 
 	// Go 的 flag 包遇到第一个位置参数就停止解析后续 flag。
 	// 这里把 flag 与位置参数重排（flag 在前），以支持 `run <yaml> --task ...` 的写法。
@@ -245,6 +261,15 @@ func runCmd(args []string) {
 	hb := heartbeat.New(ckptMgr.HeartbeatPath(state.TaskID), ac.Name, 5*time.Second)
 	hb.Start()
 	defer hb.Stop()
+
+	// 可选：同进程启动 Web 可视化面板，实时展示本次运行事件。
+	if *uiPort > 0 {
+		go func() {
+			if err := ui.StartServer(*uiPort); err != nil {
+				fmt.Fprintf(os.Stderr, "UI 服务器启动失败: %v\n", err)
+			}
+		}()
+	}
 
 	fmt.Printf("======================================================\n")
 	fmt.Printf("应用: %s\n", ac.Name)

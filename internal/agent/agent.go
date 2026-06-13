@@ -14,6 +14,7 @@ import (
 
 	"github.com/alanjchuang/goagent/internal/checkpoint"
 	"github.com/alanjchuang/goagent/internal/config"
+	"github.com/alanjchuang/goagent/internal/events"
 	"github.com/alanjchuang/goagent/internal/hooks"
 	"github.com/alanjchuang/goagent/internal/llm"
 	"github.com/alanjchuang/goagent/internal/logging"
@@ -173,6 +174,7 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 	for step := 1; step <= maxSteps; step++ {
 		fmt.Printf("\n──────── Step %d ────────\n", step)
 		logging.Get().Info("Step %d 开始 [tool_call 模式: %s]", step, a.client.NativeMode())
+		events.Publish(events.Event{Type: "step", AgentName: a.cfg.Name, Step: step})
 		// 三态检测：决定本次是否携带 tool schema（原生 tool_call）还是靠文本解析。
 		var sentSchemas []llm.ToolSchema
 		if a.client.UseNativeToolCalls() {
@@ -255,10 +257,12 @@ func (a *Agent) execTool(name, argsJSON string) string {
 	a.hooks.Fire(hooks.PreToolUse, hooks.Context{
 		Event: string(hooks.PreToolUse), ToolName: name, ToolArgs: argsJSON, AgentName: a.cfg.Name,
 	})
+	events.Publish(events.Event{Type: "tool_call", AgentName: a.cfg.Name, Detail: name + "(" + argsJSON + ")"})
 	result, err := a.registry.Execute(name, argsJSON)
 	if err != nil {
 		result = "工具执行错误: " + err.Error()
 	}
+	events.Publish(events.Event{Type: "tool_result", AgentName: a.cfg.Name, Detail: truncateForEvent(result)})
 	a.hooks.Fire(hooks.PostToolUse, hooks.Context{
 		Event: string(hooks.PostToolUse), ToolName: name, ToolArgs: argsJSON,
 		ToolResult: result, AgentName: a.cfg.Name,
@@ -266,8 +270,17 @@ func (a *Agent) execTool(name, argsJSON string) string {
 	return result
 }
 
+// truncateForEvent 截断事件详情，避免 UI 推送过长内容。
+func truncateForEvent(s string) string {
+	if len(s) > 300 {
+		return s[:300] + "..."
+	}
+	return s
+}
+
 // fireComplete 触发 TaskComplete hook，并把 checkpoint 标记为已完成。
 func (a *Agent) fireComplete(result string) {
+	events.Publish(events.Event{Type: "final_answer", AgentName: a.cfg.Name, Detail: truncateForEvent(result)})
 	a.hooks.Fire(hooks.TaskComplete, hooks.Context{
 		Event: string(hooks.TaskComplete), AgentName: a.cfg.Name, ToolResult: result,
 	})
