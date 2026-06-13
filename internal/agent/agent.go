@@ -16,6 +16,7 @@ import (
 	"github.com/alanjchuang/goagent/internal/hooks"
 	"github.com/alanjchuang/goagent/internal/llm"
 	"github.com/alanjchuang/goagent/internal/logging"
+	"github.com/alanjchuang/goagent/internal/memory"
 	"github.com/alanjchuang/goagent/internal/skills"
 	"github.com/alanjchuang/goagent/internal/toolparse"
 	"github.com/alanjchuang/goagent/internal/tools"
@@ -141,7 +142,12 @@ func (a *Agent) Run(ctx context.Context, task string) (string, error) {
 		if a.client.UseNativeToolCalls() {
 			sentSchemas = schemas
 		}
-		resp, err := a.client.Complete(ctx, messages, sentSchemas)
+		// context 压缩：在发送前对历史做去重/截断/滑窗，控制 token 预算。
+		sendMsgs := memory.Compress(messages, memory.DefaultConfig())
+		if len(sendMsgs) != len(messages) {
+			logging.Get().Info("context 压缩: %s", memory.Summary(messages, sendMsgs))
+		}
+		resp, err := a.client.Complete(ctx, sendMsgs, sentSchemas)
 		if err != nil {
 			return "", err
 		}
