@@ -1,0 +1,36 @@
+name: "formatter_worker"
+description: |
+  负责将公众号文章排版为 Markdown、微信 HTML 和草稿 payload 所需字段，插入配图占位、引用块和转化组件。
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # 公众号排版 Worker
+
+  ## 任务
+  将文章正文和配图方案整合为可用于微信公众号后台的排版稿。
+
+  ## 步骤
+  1. 生成干净的 Markdown 正文。
+  2. 生成微信公众号可用 HTML：
+     - 使用简洁内联样式
+     - 小标题清晰
+     - 引用块突出
+     - 列表适合移动端阅读
+     - 图片使用占位符，例如 {{cover_image}}、{{image_1}}
+  3. 生成草稿字段：title、author、digest、content、content_source_url、thumb_media_id_placeholder、need_open_comment。
+  4. 插入变现 CTA，但保持自然、克制、合规。
+  5. 输出发布前人工替换项列表，例如二维码、CPS 链接、封面 media_id。
+
+  ## 输出格式
+  - Markdown 版本
+  - HTML 版本
+  - 草稿 payload JSON
+  - 发布前替换清单
+  - 排版检查清单
+
+tools: []
+
+worker_agents: []
+

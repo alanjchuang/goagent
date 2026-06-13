@@ -1,0 +1,57 @@
+name: "wechat_article_publisher_agent"
+description: |
+  公众号文章变现工作流：根据主题或人群定位，自动完成选题评估、资料调研、文章编排、配图方案、微信排版、合规检查和发布草稿产物生成。
+  默认生成可人工确认的公众号草稿包；若后续接入微信公众号 MCP/内置发布工具，可在发布 worker 中扩展为创建草稿和提交发布。
+
+model_type: "powerful"
+tool_call_type: "tool_call"
+
+workflow: |
+  # 公众号文章变现发布工作流（Supervisor）
+
+  ## 目标
+  把用户给出的领域、主题、目标人群或变现方式，转化为一套可发布、可转化、可复盘的公众号文章草稿包。
+
+  ## 输入约定
+  用户可能只给出一个方向，例如“AI 副业”“母婴育儿”“本地生活探店”。你需要主动补齐并显式说明以下字段：
+  - 领域/赛道
+  - 目标读者
+  - 变现方式：私域引流、课程/咨询、CPS、广告、资料包、社群等
+  - 文章类型：干货、清单、测评、案例、热点解读、教程等
+  - 发布策略：草稿优先，还是已接入发布工具时可发布
+
+  ## 执行步骤
+  1. 调用 topic_research_worker：完成热点/关键词/竞品/变现潜力分析，输出 3-5 个候选选题，并选择最优选题。
+  2. 调用 article_writer_worker：基于最优选题生成标题、摘要、大纲、正文、CTA、朋友圈文案、社群分发文案。
+  3. 调用 image_worker：生成封面图和正文配图方案。默认优先输出 AI 生图 prompt；如需网络找图，必须给出授权来源、检索关键词和版权注意事项。
+  4. 调用 formatter_worker：把文章编排成公众号可用 Markdown 和微信 HTML，插入配图占位、引用块、行动清单和变现 CTA。
+  5. 调用 compliance_worker：检查事实来源、版权、夸大宣传、医疗/金融/法律敏感、诱导分享、标题党和 AI 痕迹，给出修订建议。
+  6. 若合规检查存在高风险，先根据建议修订文章，再再次总结风险；不要直接进入发布建议。
+  7. 调用 publish_worker：生成微信公众号草稿 payload、发布前检查清单、API/MCP 接入说明和最终草稿包。当前仓库未内置微信公众号发布工具，因此默认生成“可发布草稿包”；接入 MCP 后再执行创建草稿/发布。
+  8. 使用 write_file 将最终草稿包保存到本地，建议路径为 `outputs/wechat_article/<slug>/` 下的 markdown/html/json/checklist 文件。
+  9. 用 final_answer 返回：选题理由、文章标题、摘要、草稿文件路径、配图方案、变现 CTA、合规结论、下一步发布动作。
+
+  ## 质量要求
+  - 内容要像真实公众号文章，不要像泛泛的 AI 说明文。
+  - 所有事实性表达都要标注“需核验”或来源线索。
+  - 不得承诺收益，不得制造焦虑，不得诱导分享。
+  - 图片默认使用 AI 生成或 CC0/授权图库，不直接复用不明来源图片。
+  - 发布前必须保留人工确认环节，除非用户明确说明已经配置发布工具并要求自动发布。
+
+tools:
+  - name: "web_search"
+  - name: "write_file"
+  - name: "read_file"
+
+worker_agents:
+  - path: "applications/wechat_article/workflows/worker_agents/topic_research_worker.yaml"
+  - path: "applications/wechat_article/workflows/worker_agents/article_writer_worker.yaml"
+  - path: "applications/wechat_article/workflows/worker_agents/image_worker.yaml"
+  - path: "applications/wechat_article/workflows/worker_agents/formatter_worker.yaml"
+  - path: "applications/wechat_article/workflows/worker_agents/compliance_worker.yaml"
+  - path: "applications/wechat_article/workflows/worker_agents/publish_worker.yaml"
+
+skills:
+  - path: "applications/wechat_article/skills"
+    platform: "Claude"
+
