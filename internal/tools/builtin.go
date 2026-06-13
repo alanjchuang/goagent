@@ -43,8 +43,10 @@ func (ReadFile) Execute(args map[string]any) (string, error) {
 
 type WriteFile struct{}
 
-func (WriteFile) Name() string        { return "write_file" }
-func (WriteFile) Description() string { return "将内容写入指定路径文件（覆盖写）。自动创建父目录。" }
+func (WriteFile) Name() string { return "write_file" }
+func (WriteFile) Description() string {
+	return "将内容写入指定路径文件（覆盖写）。自动创建父目录。"
+}
 func (WriteFile) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -151,16 +153,19 @@ func (GetFileOutline) Execute(args map[string]any) (string, error) {
 // names 为 agent YAML 声明的工具名列表；未知名称会被忽略。
 func RegisterBuiltins(r *Registry, names []string) {
 	all := map[string]Tool{
-		"read_file":        ReadFile{},
-		"write_file":       WriteFile{},
-		"browse_directory": BrowseDirectory{},
-		"get_file_outline": GetFileOutline{},
-		"shell_tool":       ShellTool{},
-		"grep_search":      GrepSearch{},
-		"glob_search":      GlobSearch{},
-		"edit_file":        EditFile{},
-		"web_search":       WebSearch{},
-		"repo_map":         RepoMap{},
+		"read_file":                ReadFile{},
+		"write_file":               WriteFile{},
+		"browse_directory":         BrowseDirectory{},
+		"get_file_outline":         GetFileOutline{},
+		"shell_tool":               ShellTool{},
+		"grep_search":              GrepSearch{},
+		"glob_search":              GlobSearch{},
+		"edit_file":                EditFile{},
+		"web_search":               WebSearch{},
+		"repo_map":                 RepoMap{},
+		"lsp_find_definition":      LSPDefinition{},
+		"lsp_find_references":      LSPReferences{},
+		"lsp_get_document_symbols": LSPDocumentSymbols{},
 	}
 	for _, n := range names {
 		if t, ok := all[n]; ok {
