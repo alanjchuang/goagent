@@ -21,6 +21,7 @@ import (
 	"github.com/alanjchuang/goagent/internal/config"
 	"github.com/alanjchuang/goagent/internal/heartbeat"
 	"github.com/alanjchuang/goagent/internal/logging"
+	"github.com/alanjchuang/goagent/internal/scaffold"
 )
 
 func main() {
@@ -32,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		runCmd(os.Args[2:])
+	case "create":
+		createCmd(os.Args[2:])
 	case "list-tasks":
 		listTasksCmd()
 	case "clean-tasks":
@@ -45,11 +48,30 @@ func main() {
 	}
 }
 
+// createCmd 实现 loom create：生成 agent 的 Go 入口示例代码。
+func createCmd(args []string) {
+	fs := flag.NewFlagSet("create", flag.ExitOnError)
+	output := fs.String("o", "", "输出文件路径（默认 <yaml同目录>/<name>_app/main.go）")
+	flags, positional := splitArgs(args)
+	_ = fs.Parse(append(flags, positional...))
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "错误: 需要提供 workflow yaml 路径")
+		os.Exit(1)
+	}
+	out, err := scaffold.Create(fs.Arg(0), *output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "生成失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("已生成入口示例: %s\n运行: go run %s\n", out, out)
+}
+
 func usage() {
 	fmt.Print(`goagent (loom) - 轻量多 Agent 框架 (Go 版)
 
 用法:
   loom run <workflow.yaml> [--task "任务文本"] [--log-to-file] [--resume <taskID>]
+  loom create <workflow.yaml> [-o 输出路径]   生成 agent 的 Go 入口示例代码
   loom list-tasks                列出可恢复的 checkpoint 任务
   loom clean-tasks [--all]       清理 checkpoint（默认清理 7 天前的）
 

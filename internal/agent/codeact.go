@@ -144,7 +144,7 @@ func (a *Agent) execCode(lang, code string) string {
 		if err := tools.CheckCommandWithActive(code); err != nil {
 			return "代码被安全策略拦截: " + err.Error()
 		}
-		cmd = exec.Command("sh", "-c", code)
+		cmd = exec.Command("sh", "-c", code) //ignore_security_alert RCE
 	}
 
 	done := make(chan struct{})
